@@ -36,11 +36,19 @@ void TrayMenuViewModel::onShowHistoryClicked() {
 }
 
 void TrayMenuViewModel::onClearClipboardClicked() {
-  service_.clearHistory();
+  service_.clearUnpinnedHistory();
 }
 
 void TrayMenuViewModel::onSettingsClicked() {
   settingsVisible_ = true;
+}
+
+bool TrayMenuViewModel::onPinItemClicked(std::int64_t id, bool pinned) {
+  return service_.pinItem(id, pinned);
+}
+
+bool TrayMenuViewModel::onDeleteItemClicked(std::int64_t id) {
+  return service_.deleteItem(id);
 }
 
 void TrayMenuViewModel::onHistoryClosed() {

@@ -13,7 +13,11 @@ PrivacyFilter::PrivacyFilter(PrivacyRuleSet rules) : rules_(std::move(rules)) {
       normalized = normalized.substr(4);
       options |= std::regex::icase;
     }
-    compiledPatterns_.emplace_back(normalized, options);
+    try {
+      compiledPatterns_.emplace_back(normalized, options);
+    } catch (const std::regex_error&) {
+      // Ignore malformed regex rules to keep clipboard capture service available.
+    }
   }
 }
 

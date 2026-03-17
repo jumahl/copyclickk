@@ -18,6 +18,7 @@ class IHistoryRepository {
   virtual bool setPinned(std::int64_t id, bool pinned) = 0;
   virtual bool remove(std::int64_t id) = 0;
   virtual void clear() = 0;
+  virtual void clearUnpinned() = 0;
   virtual void trimToLimit(std::size_t limit) = 0;
 };
 

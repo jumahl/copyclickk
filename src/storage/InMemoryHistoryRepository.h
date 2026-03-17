@@ -14,6 +14,7 @@ class InMemoryHistoryRepository final : public IHistoryRepository {
   bool setPinned(std::int64_t id, bool pinned) override;
   bool remove(std::int64_t id) override;
   void clear() override;
+  void clearUnpinned() override;
   void trimToLimit(std::size_t limit) override;
 
  private:

@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,40 @@ bool testDeleteAndClearHistory() {
   return ok;
 }
 
+bool testClearUnpinnedHistoryPreservesPinnedItems() {
+  auto repo = std::make_shared<InMemoryHistoryRepository>();
+  PrivacyRuleSet rules;
+
+  ClipboardService service(repo, rules);
+  bool ok = true;
+  ok = expect(service.ingest(makeTextItem("keep", "org.kde.kate", 1)), "ingest pinned candidate should succeed") && ok;
+  ok = expect(service.ingest(makeTextItem("drop", "org.kde.kate", 2)), "ingest unpinned candidate should succeed") && ok;
+
+  auto listed = service.listRecent(10);
+  ok = expect(listed.size() == 2, "expected two items before clearUnpinnedHistory") && ok;
+  ok = expect(service.pinItem(listed.back().id, true), "pin operation should succeed") && ok;
+
+  service.clearUnpinnedHistory();
+  listed = service.listRecent(10);
+  ok = expect(listed.size() == 1, "clearUnpinnedHistory should keep only pinned entries") && ok;
+  ok = expect(listed.front().pinned, "remaining item should be pinned") && ok;
+  return ok;
+}
+
+bool testConstructorRejectsNullRepository() {
+  PrivacyRuleSet rules;
+  try {
+    ClipboardService service(nullptr, rules);
+    (void)service;
+  } catch (const std::invalid_argument&) {
+    return true;
+  } catch (...) {
+    return expect(false, "constructor should throw std::invalid_argument for null repository");
+  }
+
+  return expect(false, "constructor should reject null repository");
+}
+
 }  // namespace
 
 int main() {
@@ -88,5 +123,7 @@ int main() {
   ok = testRejectsSensitivePayloadAtServiceLayer() && ok;
   ok = testStoresAndPinsItem() && ok;
   ok = testDeleteAndClearHistory() && ok;
+  ok = testClearUnpinnedHistoryPreservesPinnedItems() && ok;
+  ok = testConstructorRejectsNullRepository() && ok;
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

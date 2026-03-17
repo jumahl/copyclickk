@@ -1,7 +1,9 @@
 #include "SqliteHistoryRepository.h"
 
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 
 namespace copyclickk {
 
@@ -48,6 +50,12 @@ SqliteHistoryRepository::SqliteHistoryRepository(std::string dbPath) {
     db_ = nullptr;
     throw std::runtime_error("failed to open sqlite db: " + message);
   }
+
+  std::error_code ec;
+  std::filesystem::permissions(dbPath,
+                               std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace,
+                               ec);
 
   initializeSchema();
 }
@@ -220,11 +228,17 @@ void SqliteHistoryRepository::clear() {
   execOrThrow(db_, "DELETE FROM history;");
 }
 
+void SqliteHistoryRepository::clearUnpinned() {
+  execOrThrow(db_, "DELETE FROM history WHERE pinned = 0;");
+}
+
 void SqliteHistoryRepository::trimToLimit(std::size_t limit) {
   sqlite3_stmt* stmt = nullptr;
   const char* sql =
       "DELETE FROM history WHERE id IN ("
-      "SELECT id FROM history ORDER BY timestamp_ms DESC LIMIT -1 OFFSET ?1"
+      "SELECT id FROM history WHERE pinned = 0 ORDER BY timestamp_ms DESC LIMIT -1 OFFSET ("
+      "SELECT CASE WHEN ?1 > COUNT(*) THEN ?1 - COUNT(*) ELSE 0 END FROM history WHERE pinned = 1"
+      ")"
       ");";
 
   if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {

@@ -75,6 +75,15 @@ bool testImageBypassesTextPatterns() {
   return expect(decision == PrivacyDecision::Allow, "non-text mime types should bypass text regex checks");
 }
 
+bool testIgnoresInvalidRegexRules() {
+  PrivacyRuleSet rules;
+  rules.sensitiveTextPatterns = {"("};
+
+  PrivacyFilter filter(rules);
+  auto decision = filter.evaluate(makeTextItem("safe text", "org.kde.kate"));
+  return expect(decision == PrivacyDecision::Allow, "invalid regex rules should be ignored safely");
+}
+
 }  // namespace
 
 int main() {
@@ -83,5 +92,6 @@ int main() {
   ok = testRejectsSensitivePattern() && ok;
   ok = testAllowsSafeText() && ok;
   ok = testImageBypassesTextPatterns() && ok;
+  ok = testIgnoresInvalidRegexRules() && ok;
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

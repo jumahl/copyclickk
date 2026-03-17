@@ -20,6 +20,7 @@
 #include "../ui/TrayMenuViewModel.h"
 
 class QMimeData;
+class QListWidgetItem;
 
 namespace copyclickk {
 
@@ -27,17 +28,23 @@ class TrayAppController : public QObject {
  public:
   TrayAppController(std::shared_ptr<IHistoryRepository> repository, QObject* parent = nullptr);
   void start();
+  void showHistoryFromExternalTrigger();
 
  private:
   void onTrayActivated(QSystemTrayIcon::ActivationReason reason);
   void onShowHistoryTriggered();
   void onClearClipboardTriggered();
   void onSettingsTriggered();
+  void onToggleHistoryShortcutTriggered();
   void onClipboardChanged();
+  void onHistoryItemActivated(QListWidgetItem* item);
 
   void createTray();
   void ensureHistoryWindow();
   void ensureSettingsDialog();
+  void applyItemToClipboard(std::int64_t itemId);
+  [[nodiscard]] QMimeData* mimeDataFromItem(const ClipboardItem& item) const;
+  void populateHistoryList(QListWidget* listWidget);
   void refreshHistoryList();
   void registerOpenHistoryShortcut();
   void loadSettings();

@@ -75,21 +75,47 @@ void InMemoryHistoryRepository::clear() {
   items_.clear();
 }
 
+void InMemoryHistoryRepository::clearUnpinned() {
+  std::erase_if(items_, [](const ClipboardItem& item) {
+    return !item.pinned;
+  });
+}
+
 void InMemoryHistoryRepository::trimToLimit(std::size_t limit) {
-  if (items_.size() <= limit) {
+  if (items_.empty()) {
     return;
   }
 
-  std::vector<ClipboardItem> sorted = items_;
-  std::sort(sorted.begin(), sorted.end(), [](const ClipboardItem& left, const ClipboardItem& right) {
+  std::vector<ClipboardItem> pinned;
+  std::vector<ClipboardItem> unpinned;
+  pinned.reserve(items_.size());
+  unpinned.reserve(items_.size());
+
+  for (const auto& item : items_) {
+    if (item.pinned) {
+      pinned.push_back(item);
+    } else {
+      unpinned.push_back(item);
+    }
+  }
+
+  const std::size_t pinnedCount = pinned.size();
+  if (pinnedCount >= limit) {
+    items_ = std::move(pinned);
+    return;
+  }
+
+  std::sort(unpinned.begin(), unpinned.end(), [](const ClipboardItem& left, const ClipboardItem& right) {
     return left.timestampMs > right.timestampMs;
   });
 
-  if (sorted.size() > limit) {
-    sorted.resize(limit);
+  const std::size_t allowedUnpinned = limit - pinnedCount;
+  if (unpinned.size() > allowedUnpinned) {
+    unpinned.resize(allowedUnpinned);
   }
 
-  items_ = std::move(sorted);
+  pinned.insert(pinned.end(), unpinned.begin(), unpinned.end());
+  items_ = std::move(pinned);
 }
 
 }  // namespace copyclickk

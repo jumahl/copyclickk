@@ -1,8 +1,10 @@
 #include "SettingsModel.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 
 namespace copyclickk {
 
@@ -107,6 +109,17 @@ bool SettingsModel::saveToFile(const std::string& filePath) const {
   output << "start_in_system_tray=" << (startInSystemTray_ ? "1" : "0") << "\n";
   output << "language=" << language_ << "\n";
   output << "open_history_shortcut=" << openHistoryShortcut_ << "\n";
+
+  output.flush();
+  if (!output.good()) {
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::permissions(filePath,
+                               std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace,
+                               ec);
   return true;
 }
 

@@ -1,4 +1,4 @@
-find_package(Qt6 COMPONENTS Widgets QUIET)
+find_package(Qt6 COMPONENTS Widgets Network QUIET)
 find_package(KF6GlobalAccel QUIET)
 
 if(NOT Qt6_FOUND)
@@ -26,6 +26,7 @@ target_compile_definitions(copyclickk_tray
 target_link_libraries(copyclickk_tray
   PRIVATE
     Qt6::Widgets
+    Qt6::Network
     copyclickk_ui
     copyclickk_ipc
     copyclickk_storage

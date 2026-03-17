@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <system_error>
 
 #include "../src/ipc/ClipboardService.h"
 #include "../src/storage/InMemoryHistoryRepository.h"
@@ -23,6 +24,11 @@ bool expect(bool condition, const std::string& message) {
     return false;
   }
   return true;
+}
+
+bool hasNoGroupOrOthersPermissions(std::filesystem::perms permissions) {
+  const auto publicBits = std::filesystem::perms::group_all | std::filesystem::perms::others_all;
+  return (permissions & publicBits) == std::filesystem::perms::none;
 }
 
 bool testDefaultEnglishLabels() {
@@ -66,6 +72,50 @@ bool testClearClipboardActionClearsHistory() {
   return ok;
 }
 
+bool testClearClipboardPreservesPinnedItems() {
+  auto repo = std::make_shared<InMemoryHistoryRepository>();
+  ClipboardService service(repo, PrivacyRuleSet{});
+  SettingsModel settings;
+  TrayMenuViewModel tray(service, settings);
+
+  tray.debugSeedText("keep", 1);
+  tray.debugSeedText("drop", 2);
+  auto items = tray.recentItems();
+
+  bool ok = true;
+  ok = expect(items.size() == 2, "test setup should seed two items") && ok;
+  ok = expect(tray.onPinItemClicked(items.back().id, true), "pin action should succeed") && ok;
+
+  tray.onClearClipboardClicked();
+  items = tray.recentItems();
+  ok = expect(items.size() == 1, "clear action should preserve pinned items") && ok;
+  ok = expect(items.front().pinned, "remaining item should be pinned") && ok;
+  return ok;
+}
+
+bool testPerItemPinAndDeleteActions() {
+  auto repo = std::make_shared<InMemoryHistoryRepository>();
+  ClipboardService service(repo, PrivacyRuleSet{});
+  SettingsModel settings;
+  TrayMenuViewModel tray(service, settings);
+
+  tray.debugSeedText("first", 1);
+  tray.debugSeedText("second", 2);
+  auto items = tray.recentItems();
+  bool ok = true;
+  ok = expect(items.size() == 2, "test setup should create two items") && ok;
+
+  const auto firstId = items.front().id;
+  ok = expect(tray.onPinItemClicked(firstId, true), "pin action should update item") && ok;
+  items = tray.recentItems();
+  ok = expect(items.front().id == firstId && items.front().pinned, "pinned item should be listed first") && ok;
+
+  ok = expect(tray.onDeleteItemClicked(firstId), "delete action should remove selected item") && ok;
+  items = tray.recentItems();
+  ok = expect(items.size() == 1, "one item should remain after delete") && ok;
+  return ok;
+}
+
 bool testSettingsAdjustHistoryLimit() {
   auto repo = std::make_shared<InMemoryHistoryRepository>();
   ClipboardService service(repo, PrivacyRuleSet{});
@@ -100,6 +150,14 @@ bool testSettingsPersistenceRoundTrip() {
   ok = expect(loaded.thumbnailSizePx() == 64, "thumbnail size should persist") && ok;
   ok = expect(loaded.openHistoryShortcut() == "Ctrl+Shift+H", "shortcut should persist") && ok;
 
+  std::error_code ec;
+  const auto status = std::filesystem::status(path, ec);
+  ok = expect(!ec, "status for settings file should be readable") && ok;
+  if (!ec) {
+    ok = expect(hasNoGroupOrOthersPermissions(status.permissions()),
+                "settings file should not be readable by group/others") && ok;
+  }
+
   std::filesystem::remove(path);
   return ok;
 }
@@ -111,6 +169,8 @@ int main() {
   ok = testDefaultEnglishLabels() && ok;
   ok = testTrayClickOpensHistory() && ok;
   ok = testClearClipboardActionClearsHistory() && ok;
+  ok = testClearClipboardPreservesPinnedItems() && ok;
+  ok = testPerItemPinAndDeleteActions() && ok;
   ok = testSettingsAdjustHistoryLimit() && ok;
   ok = testSettingsPersistenceRoundTrip() && ok;
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;

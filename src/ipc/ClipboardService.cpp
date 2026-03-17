@@ -1,9 +1,15 @@
 #include "ClipboardService.h"
 
+#include <stdexcept>
+
 namespace copyclickk {
 
 ClipboardService::ClipboardService(std::shared_ptr<IHistoryRepository> repository, PrivacyRuleSet rules)
-    : repository_(std::move(repository)), privacyFilter_(std::move(rules)) {}
+    : repository_(std::move(repository)), privacyFilter_(std::move(rules)) {
+  if (!repository_) {
+    throw std::invalid_argument("ClipboardService requires a non-null repository");
+  }
+}
 
 bool ClipboardService::ingest(const ClipboardItem& item) {
   if (privacyFilter_.evaluate(item) != PrivacyDecision::Allow) {
@@ -45,6 +51,10 @@ bool ClipboardService::deleteItem(std::int64_t id) {
 
 void ClipboardService::clearHistory() {
   repository_->clear();
+}
+
+void ClipboardService::clearUnpinnedHistory() {
+  repository_->clearUnpinned();
 }
 
 }  // namespace copyclickk

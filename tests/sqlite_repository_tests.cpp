@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "../src/core/ClipboardItem.h"
@@ -28,6 +29,11 @@ bool expect(bool condition, const std::string& message) {
     return false;
   }
   return true;
+}
+
+bool hasNoGroupOrOthersPermissions(std::filesystem::perms permissions) {
+  const auto publicBits = std::filesystem::perms::group_all | std::filesystem::perms::others_all;
+  return (permissions & publicBits) == std::filesystem::perms::none;
 }
 
 bool testSqliteDeduplicatesByMimeAndPayload() {
@@ -114,6 +120,65 @@ bool testSqliteTrimToLimitRemovesOldest() {
   return ok;
 }
 
+bool testSqliteTrimToLimitKeepsPinnedItems() {
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-test-trim-pinned.db";
+  std::filesystem::remove(path);
+  SqliteHistoryRepository repo(path.string());
+
+  auto pinned = repo.add(makeTextItem("pinned", 1));
+  repo.add(makeTextItem("two", 2));
+  repo.add(makeTextItem("three", 3));
+  (void)repo.setPinned(pinned.id, true);
+  repo.trimToLimit(1);
+
+  auto listed = repo.list(10);
+  bool ok = true;
+  ok = expect(listed.size() == 1, "trim should keep pinned rows when limit is small") && ok;
+  ok = expect(listed.front().id == pinned.id, "pinned row should survive trim") && ok;
+
+  std::filesystem::remove(path);
+  return ok;
+}
+
+bool testSqliteClearUnpinnedPreservesPinnedRows() {
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-test-clear-pinned.db";
+  std::filesystem::remove(path);
+  SqliteHistoryRepository repo(path.string());
+
+  auto pinned = repo.add(makeTextItem("keep", 1));
+  repo.add(makeTextItem("drop", 2));
+  (void)repo.setPinned(pinned.id, true);
+  repo.clearUnpinned();
+
+  auto listed = repo.list(10);
+  bool ok = true;
+  ok = expect(listed.size() == 1, "clearUnpinned should remove only unpinned rows") && ok;
+  ok = expect(listed.front().id == pinned.id, "pinned row should remain after clearUnpinned") && ok;
+
+  std::filesystem::remove(path);
+  return ok;
+}
+
+bool testSqliteDatabaseFileIsPrivate() {
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-test-perms.db";
+  std::filesystem::remove(path);
+
+  SqliteHistoryRepository repo(path.string());
+  (void)repo.add(makeTextItem("hello", 1));
+
+  std::error_code ec;
+  const auto status = std::filesystem::status(path, ec);
+  bool ok = true;
+  ok = expect(!ec, "status for sqlite file should be readable") && ok;
+  if (!ec) {
+    ok = expect(hasNoGroupOrOthersPermissions(status.permissions()),
+                "sqlite history file should not be readable by group/others") && ok;
+  }
+
+  std::filesystem::remove(path);
+  return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -122,5 +187,8 @@ int main() {
   ok = testSqlitePinnedItemsFirst() && ok;
   ok = testSqlitePersistsAcrossInstances() && ok;
   ok = testSqliteTrimToLimitRemovesOldest() && ok;
+  ok = testSqliteTrimToLimitKeepsPinnedItems() && ok;
+  ok = testSqliteClearUnpinnedPreservesPinnedRows() && ok;
+  ok = testSqliteDatabaseFileIsPrivate() && ok;
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

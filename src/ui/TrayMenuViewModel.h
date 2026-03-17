@@ -24,6 +24,8 @@ class TrayMenuViewModel {
   void onShowHistoryClicked();
   void onClearClipboardClicked();
   void onSettingsClicked();
+  [[nodiscard]] bool onPinItemClicked(std::int64_t id, bool pinned);
+  [[nodiscard]] bool onDeleteItemClicked(std::int64_t id);
   void onHistoryClosed();
   void onSettingsClosed();
   void updateHistoryLimit(int limit);

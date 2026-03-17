@@ -21,6 +21,7 @@ class ClipboardService {
   [[nodiscard]] bool pinItem(std::int64_t id, bool pinned);
   [[nodiscard]] bool deleteItem(std::int64_t id);
   void clearHistory();
+  void clearUnpinnedHistory();
 
  private:
   std::shared_ptr<IHistoryRepository> repository_;

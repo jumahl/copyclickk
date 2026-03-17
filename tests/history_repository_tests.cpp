@@ -76,6 +76,38 @@ bool testTrimToLimitRemovesOldestEntries() {
   return ok;
 }
 
+bool testTrimToLimitNeverDeletesPinnedItems() {
+  InMemoryHistoryRepository repo;
+  auto pinned = repo.add(makeTextItem("pinned", 1000));
+  repo.add(makeTextItem("second", 2000));
+  repo.add(makeTextItem("third", 3000));
+  (void)repo.setPinned(pinned.id, true);
+
+  repo.trimToLimit(1);
+  const auto listed = repo.list(10);
+
+  bool ok = true;
+  ok = expect(listed.size() == 1, "trim should keep pinned item even at low limits") && ok;
+  ok = expect(listed.front().pinned, "remaining item should be pinned") && ok;
+  return ok;
+}
+
+bool testClearUnpinnedPreservesPinnedItems() {
+  InMemoryHistoryRepository repo;
+  auto pinned = repo.add(makeTextItem("keep", 1000));
+  auto regular = repo.add(makeTextItem("remove", 2000));
+  (void)regular;
+  (void)repo.setPinned(pinned.id, true);
+
+  repo.clearUnpinned();
+  const auto listed = repo.list(10);
+
+  bool ok = true;
+  ok = expect(listed.size() == 1, "clearUnpinned should remove only non-pinned entries") && ok;
+  ok = expect(listed.front().id == pinned.id, "pinned entry should remain after clearUnpinned") && ok;
+  return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -83,6 +115,8 @@ int main() {
   ok = testDeduplicatesIdenticalPayloadAndMime() && ok;
   ok = testPinnedItemsAppearBeforeNonPinned() && ok;
   ok = testTrimToLimitRemovesOldestEntries() && ok;
+  ok = testTrimToLimitNeverDeletesPinnedItems() && ok;
+  ok = testClearUnpinnedPreservesPinnedItems() && ok;
 
   if (!ok) {
     return EXIT_FAILURE;

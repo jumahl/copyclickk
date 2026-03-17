@@ -6,11 +6,16 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QDialogButtonBox>
+#include <QHBoxLayout>
 #include <QKeySequenceEdit>
 #include <QLabel>
 #include <QMimeData>
 #include <QPushButton>
 #include <QStyle>
+#include <QTextDocumentFragment>
+#include <QToolButton>
+#include <QUrl>
+#include <QVariant>
 #include <QVBoxLayout>
 
 #include <QBuffer>
@@ -64,6 +69,18 @@ class SettingsDialog final : public QDialog {
 
 std::string payloadToText(const ClipboardItem& item) {
   return std::string(item.payload.begin(), item.payload.end());
+}
+
+QString previewTextForItem(const ClipboardItem& item) {
+  const QString raw = QString::fromStdString(payloadToText(item));
+  if (item.mimeType == ClipboardMimeType::TextHtml) {
+    const QString plain = QTextDocumentFragment::fromHtml(raw).toPlainText().trimmed();
+    if (!plain.isEmpty()) {
+      return plain;
+    }
+  }
+
+  return raw;
 }
 
 QString truncatedPreview(QString text, int maxChars = 30) {
@@ -121,10 +138,39 @@ QIcon resolveTrayIcon() {
   return QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView);
 }
 
+QIcon resolveActionIcon(const QString& relativeAssetPath, QStyle::StandardPixmap fallback) {
+#ifdef COPYCLICKK_ASSETS_DIR
+  const QString fullPath = QStringLiteral(COPYCLICKK_ASSETS_DIR) + "/" + relativeAssetPath;
+  if (QFileInfo::exists(fullPath)) {
+    const QIcon icon(fullPath);
+    if (!icon.isNull()) {
+      return icon;
+    }
+  }
+#endif
+  return QApplication::style()->standardIcon(fallback);
+}
+
+QIcon resolvePinIcon(bool pinned) {
+  if (pinned) {
+    return resolveActionIcon("icons/tray/pin-filled.svg", QStyle::SP_DialogApplyButton);
+  }
+  return resolveActionIcon("icons/tray/pin.svg", QStyle::SP_DialogApplyButton);
+}
+
+QIcon resolveDeleteIcon() {
+  return resolveActionIcon("icons/tray/trash.svg", QStyle::SP_TrashIcon);
+}
+
 std::string defaultSettingsFilePath() {
   const char* home = std::getenv("HOME");
   const std::string baseDir = home != nullptr ? std::string(home) + "/.config/copyclickk" : ".";
-  std::filesystem::create_directories(baseDir);
+  std::error_code ec;
+  std::filesystem::create_directories(baseDir, ec);
+  std::filesystem::permissions(baseDir,
+                               std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace,
+                               ec);
   return baseDir + "/settings.ini";
 }
 
@@ -146,10 +192,14 @@ void TrayAppController::start() {
   trayIcon_.show();
 }
 
+void TrayAppController::showHistoryFromExternalTrigger() {
+  onShowHistoryTriggered();
+}
+
 void TrayAppController::onTrayActivated(QSystemTrayIcon::ActivationReason reason) {
   if (reason == QSystemTrayIcon::Trigger) {
     trayViewModel_.onTrayIconClicked();
-    onShowHistoryTriggered();
+    onToggleHistoryShortcutTriggered();
   }
 }
 
@@ -178,6 +228,16 @@ void TrayAppController::onSettingsTriggered() {
   settingsDialog_->activateWindow();
 }
 
+void TrayAppController::onToggleHistoryShortcutTriggered() {
+  if (historyWindow_ != nullptr && historyWindow_->isVisible()) {
+    historyWindow_->hide();
+    trayViewModel_.onHistoryClosed();
+    return;
+  }
+
+  onShowHistoryTriggered();
+}
+
 void TrayAppController::onClipboardChanged() {
   if (suppressClipboardCapture_) {
     return;
@@ -195,6 +255,24 @@ void TrayAppController::onClipboardChanged() {
 
   if (trayViewModel_.isHistoryVisible()) {
     refreshHistoryList();
+  }
+}
+
+void TrayAppController::onHistoryItemActivated(QListWidgetItem* item) {
+  if (item == nullptr) {
+    return;
+  }
+
+  const QVariant idData = item->data(Qt::UserRole);
+  if (!idData.isValid()) {
+    return;
+  }
+
+  applyItemToClipboard(idData.toLongLong());
+
+  if (historyWindow_ != nullptr) {
+    historyWindow_->hide();
+    trayViewModel_.onHistoryClosed();
   }
 }
 
@@ -238,9 +316,69 @@ void TrayAppController::ensureHistoryWindow() {
 
   QObject::connect(clearButton, &QPushButton::clicked, this, &TrayAppController::onClearClipboardTriggered);
   QObject::connect(settingsButton, &QPushButton::clicked, this, &TrayAppController::onSettingsTriggered);
+  QObject::connect(historyList_, &QListWidget::itemClicked, this, &TrayAppController::onHistoryItemActivated);
+  QObject::connect(historyList_, &QListWidget::itemActivated, this, &TrayAppController::onHistoryItemActivated);
 
   window->onClosed = [this]() { trayViewModel_.onHistoryClosed(); };
   historyWindow_ = window;
+}
+
+void TrayAppController::applyItemToClipboard(std::int64_t itemId) {
+  const auto item = service_.getItem(itemId);
+  if (!item.has_value()) {
+    return;
+  }
+
+  QMimeData* mimeData = mimeDataFromItem(*item);
+  if (mimeData == nullptr) {
+    return;
+  }
+
+  suppressClipboardCapture_ = true;
+  QApplication::clipboard()->setMimeData(mimeData);
+  suppressClipboardCapture_ = false;
+}
+
+QMimeData* TrayAppController::mimeDataFromItem(const ClipboardItem& item) const {
+  auto* mimeData = new QMimeData();
+
+  if (item.mimeType == ClipboardMimeType::TextPlain) {
+    mimeData->setText(QString::fromUtf8(reinterpret_cast<const char*>(item.payload.data()),
+                                        static_cast<int>(item.payload.size())));
+    return mimeData;
+  }
+
+  if (item.mimeType == ClipboardMimeType::TextHtml) {
+    mimeData->setHtml(QString::fromUtf8(reinterpret_cast<const char*>(item.payload.data()),
+                                        static_cast<int>(item.payload.size())));
+    return mimeData;
+  }
+
+  if (item.mimeType == ClipboardMimeType::TextUriList) {
+    const QString text = QString::fromUtf8(reinterpret_cast<const char*>(item.payload.data()),
+                                           static_cast<int>(item.payload.size()));
+    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+    QList<QUrl> urls;
+    urls.reserve(lines.size());
+    for (const QString& line : lines) {
+      urls.push_back(QUrl(line));
+    }
+    mimeData->setUrls(urls);
+    mimeData->setText(text);
+    return mimeData;
+  }
+
+  if (isImageMimeType(item.mimeType)) {
+    QImage image;
+    image.loadFromData(reinterpret_cast<const uchar*>(item.payload.data()), static_cast<int>(item.payload.size()));
+    if (!image.isNull()) {
+      mimeData->setImageData(image);
+      return mimeData;
+    }
+  }
+
+  delete mimeData;
+  return nullptr;
 }
 
 void TrayAppController::ensureSettingsDialog() {
@@ -289,39 +427,85 @@ void TrayAppController::ensureSettingsDialog() {
   settingsDialog_ = dialog;
 }
 
-void TrayAppController::refreshHistoryList() {
-  if (historyList_ == nullptr) {
+void TrayAppController::populateHistoryList(QListWidget* listWidget) {
+  if (listWidget == nullptr) {
     return;
   }
 
-  historyList_->clear();
-  historyList_->setIconSize(QSize(settings_.thumbnailSizePx(), settings_.thumbnailSizePx()));
+  listWidget->clear();
+  listWidget->setIconSize(QSize(settings_.thumbnailSizePx(), settings_.thumbnailSizePx()));
+
   for (const auto& item : trayViewModel_.recentItems()) {
-    auto* widgetItem = new QListWidgetItem();
-    QString entry;
+    QString preview;
+    if (isImageMimeType(item.mimeType)) {
+      preview = "[Image]";
+    } else if (item.mimeType == ClipboardMimeType::TextPlain || item.mimeType == ClipboardMimeType::TextHtml ||
+               item.mimeType == ClipboardMimeType::TextUriList) {
+      preview = truncatedPreview(previewTextForItem(item), 60);
+    } else {
+      preview = "[Non-text item]";
+    }
+
+    auto* rowWidget = new QWidget(listWidget);
+    auto* rowLayout = new QHBoxLayout(rowWidget);
+    rowLayout->setContentsMargins(8, 8, 8, 8);
+    rowLayout->setSpacing(10);
 
     if (isImageMimeType(item.mimeType)) {
       const QPixmap pixmap = pixmapFromItem(item);
       if (!pixmap.isNull()) {
+        auto* iconLabel = new QLabel(rowWidget);
         const QPixmap scaled = pixmap.scaled(settings_.thumbnailSizePx(), settings_.thumbnailSizePx(), Qt::KeepAspectRatio,
                                              Qt::SmoothTransformation);
-        widgetItem->setIcon(QIcon(scaled));
+        iconLabel->setPixmap(scaled);
+        rowLayout->addWidget(iconLabel);
       }
-      entry = "[Image]";
-    } else if (item.mimeType == ClipboardMimeType::TextPlain || item.mimeType == ClipboardMimeType::TextHtml ||
-               item.mimeType == ClipboardMimeType::TextUriList) {
-      entry = truncatedPreview(QString::fromStdString(payloadToText(item)), 30);
-    } else {
-      entry = "[Non-text item]";
     }
 
-    if (item.pinned) {
-      entry = "[Pinned] " + entry;
-    }
+    auto* textLabel = new QLabel(QString(item.pinned ? "[Pinned] " : "") + preview, rowWidget);
+    textLabel->setWordWrap(true);
+    textLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    textLabel->setMinimumHeight(34);
+    rowLayout->addWidget(textLabel);
 
-    widgetItem->setText(entry);
-    historyList_->addItem(widgetItem);
+    auto* pinButton = new QToolButton(rowWidget);
+    pinButton->setIcon(resolvePinIcon(item.pinned));
+    pinButton->setIconSize(QSize(18, 18));
+    pinButton->setToolTip(item.pinned ? "Unpin item" : "Pin item");
+    pinButton->setAutoRaise(true);
+    rowLayout->addWidget(pinButton);
+
+    auto* deleteButton = new QToolButton(rowWidget);
+    deleteButton->setIcon(resolveDeleteIcon());
+    deleteButton->setIconSize(QSize(18, 18));
+    deleteButton->setToolTip("Delete item");
+    deleteButton->setAutoRaise(true);
+    rowLayout->addWidget(deleteButton);
+
+    const std::int64_t itemId = item.id;
+    const bool currentlyPinned = item.pinned;
+    QObject::connect(pinButton, &QToolButton::clicked, this, [this, itemId, currentlyPinned]() {
+      if (trayViewModel_.onPinItemClicked(itemId, !currentlyPinned)) {
+        refreshHistoryList();
+      }
+    });
+    QObject::connect(deleteButton, &QToolButton::clicked, this, [this, itemId]() {
+      if (trayViewModel_.onDeleteItemClicked(itemId)) {
+        refreshHistoryList();
+      }
+    });
+
+    auto* rowItem = new QListWidgetItem();
+    rowWidget->setMinimumHeight(50);
+    rowItem->setData(Qt::UserRole, static_cast<qlonglong>(item.id));
+    rowItem->setSizeHint(rowWidget->sizeHint());
+    listWidget->addItem(rowItem);
+    listWidget->setItemWidget(rowItem, rowWidget);
   }
+}
+
+void TrayAppController::refreshHistoryList() {
+  populateHistoryList(historyList_);
 }
 
 bool TrayAppController::buildClipboardItemFromMimeData(const QMimeData* mimeData, ClipboardItem* item) const {
@@ -405,7 +589,10 @@ void TrayAppController::registerOpenHistoryShortcut() {
   if (globalShowHistoryAction_ == nullptr) {
     globalShowHistoryAction_ = new QAction(QString::fromStdString(trayViewModel_.showHistoryLabel()), this);
     globalShowHistoryAction_->setObjectName("copyclickk.show-history");
-    QObject::connect(globalShowHistoryAction_, &QAction::triggered, this, &TrayAppController::onShowHistoryTriggered);
+    QObject::connect(globalShowHistoryAction_,
+                     &QAction::triggered,
+                     this,
+                     &TrayAppController::onToggleHistoryShortcutTriggered);
   }
 
   const auto sequence = QKeySequence(QString::fromStdString(trayViewModel_.openHistoryShortcut()));
@@ -434,7 +621,10 @@ void TrayAppController::registerOpenHistoryShortcut() {
 
   openHistoryShortcut_ = new QShortcut(sequence, shortcutHost_);
   openHistoryShortcut_->setContext(Qt::ApplicationShortcut);
-  QObject::connect(openHistoryShortcut_, &QShortcut::activated, this, &TrayAppController::onShowHistoryTriggered);
+  QObject::connect(openHistoryShortcut_,
+                   &QShortcut::activated,
+                   this,
+                   &TrayAppController::onToggleHistoryShortcutTriggered);
 #endif
 }
 
