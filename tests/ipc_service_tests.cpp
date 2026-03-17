@@ -116,6 +116,28 @@ bool testConstructorRejectsNullRepository() {
   return expect(false, "constructor should reject null repository");
 }
 
+bool testRemoveOlderThanPreservesPinnedEntries() {
+  auto repo = std::make_shared<InMemoryHistoryRepository>();
+  PrivacyRuleSet rules;
+
+  ClipboardService service(repo, rules);
+  bool ok = true;
+  ok = expect(service.ingest(makeTextItem("keep pinned", "org.kde.kate", 1000)), "first ingest should succeed") && ok;
+  ok = expect(service.ingest(makeTextItem("drop old", "org.kde.kate", 2000)), "second ingest should succeed") && ok;
+  ok = expect(service.ingest(makeTextItem("keep new", "org.kde.kate", 4000)), "third ingest should succeed") && ok;
+
+  auto listed = service.listRecent(10);
+  ok = expect(listed.size() == 3, "setup should have 3 entries") && ok;
+  const auto oldest = listed.back().id;
+  ok = expect(service.pinItem(oldest, true), "pin oldest item should succeed") && ok;
+
+  service.removeOlderThan(3000);
+  listed = service.listRecent(10);
+  ok = expect(listed.size() == 2, "retention cleanup should remove only old unpinned entries") && ok;
+  ok = expect(listed.front().pinned || listed.back().pinned, "pinned old entry should be preserved") && ok;
+  return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -125,5 +147,6 @@ int main() {
   ok = testDeleteAndClearHistory() && ok;
   ok = testClearUnpinnedHistoryPreservesPinnedItems() && ok;
   ok = testConstructorRejectsNullRepository() && ok;
+  ok = testRemoveOlderThanPreservesPinnedEntries() && ok;
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

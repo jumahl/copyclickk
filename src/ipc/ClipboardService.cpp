@@ -57,4 +57,8 @@ void ClipboardService::clearUnpinnedHistory() {
   repository_->clearUnpinned();
 }
 
+void ClipboardService::removeOlderThan(std::int64_t cutoffTimestampMs) {
+  repository_->removeOlderThan(cutoffTimestampMs);
+}
+
 }  // namespace copyclickk

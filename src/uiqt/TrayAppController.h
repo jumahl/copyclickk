@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QKeySequenceEdit>
 #include <QListWidget>
@@ -49,6 +51,11 @@ class TrayAppController : public QObject {
   void registerOpenHistoryShortcut();
   void loadSettings();
   void saveSettings() const;
+  void applyTheme();
+  void applyStartupEntry();
+  void enforceRetentionPolicy();
+  [[nodiscard]] bool isConsecutiveDuplicate(const ClipboardItem& item) const;
+  [[nodiscard]] bool encodeImageToItem(const QImage& image, ClipboardItem* item) const;
   bool buildClipboardItemFromMimeData(const QMimeData* mimeData, ClipboardItem* item) const;
 
   std::shared_ptr<IHistoryRepository> repository_;
@@ -69,7 +76,16 @@ class TrayAppController : public QObject {
   QPointer<QDialog> settingsDialog_;
   QPointer<QSpinBox> historyLimitSpinBox_;
   QPointer<QSpinBox> thumbnailSizeSpinBox_;
+  QPointer<QSpinBox> imageCompressionQualitySpinBox_;
+  QPointer<QComboBox> retentionPeriodComboBox_;
   QPointer<QKeySequenceEdit> openHistoryShortcutEdit_;
+  QPointer<QCheckBox> skipConsecutiveDuplicatesCheckBox_;
+  QPointer<QCheckBox> pasteAsPlainTextCheckBox_;
+  QPointer<QCheckBox> saveImagesCheckBox_;
+  QPointer<QCheckBox> compressImagesCheckBox_;
+  QPointer<QCheckBox> startAtLoginCheckBox_;
+  QPointer<QCheckBox> confirmClearAllCheckBox_;
+  QPointer<QComboBox> themeComboBox_;
   QPointer<QWidget> shortcutHost_;
   QPointer<QShortcut> openHistoryShortcut_;
   bool suppressClipboardCapture_{false};

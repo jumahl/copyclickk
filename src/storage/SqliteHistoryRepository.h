@@ -24,6 +24,7 @@ class SqliteHistoryRepository final : public IHistoryRepository {
   void clear() override;
   void clearUnpinned() override;
   void trimToLimit(std::size_t limit) override;
+  void removeOlderThan(std::int64_t cutoffTimestampMs) override;
 
  private:
   void initializeSchema();

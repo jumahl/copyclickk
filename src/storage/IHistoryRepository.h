@@ -20,6 +20,7 @@ class IHistoryRepository {
   virtual void clear() = 0;
   virtual void clearUnpinned() = 0;
   virtual void trimToLimit(std::size_t limit) = 0;
+  virtual void removeOlderThan(std::int64_t cutoffTimestampMs) = 0;
 };
 
 }  // namespace copyclickk

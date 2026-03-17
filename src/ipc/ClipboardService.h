@@ -22,6 +22,7 @@ class ClipboardService {
   [[nodiscard]] bool deleteItem(std::int64_t id);
   void clearHistory();
   void clearUnpinnedHistory();
+  void removeOlderThan(std::int64_t cutoffTimestampMs);
 
  private:
   std::shared_ptr<IHistoryRepository> repository_;

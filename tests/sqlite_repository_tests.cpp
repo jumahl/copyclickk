@@ -53,6 +53,24 @@ bool testSqliteDeduplicatesByMimeAndPayload() {
   return ok;
 }
 
+bool testSqliteAllowsNonConsecutiveDuplicateEntries() {
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-test-non-consecutive.db";
+  std::filesystem::remove(path);
+  SqliteHistoryRepository repo(path.string());
+
+  auto first = repo.add(makeTextItem("hello", 1000));
+  (void)repo.add(makeTextItem("other", 1500));
+  auto third = repo.add(makeTextItem("hello", 2000));
+  auto listed = repo.list(10);
+
+  bool ok = true;
+  ok = expect(first.id != third.id, "sqlite should keep non-consecutive duplicates") && ok;
+  ok = expect(listed.size() == 3, "sqlite should keep three rows for non-consecutive duplicate sequence") && ok;
+
+  std::filesystem::remove(path);
+  return ok;
+}
+
 bool testSqlitePinnedItemsFirst() {
   const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-test-pinned.db";
   std::filesystem::remove(path);
@@ -179,16 +197,38 @@ bool testSqliteDatabaseFileIsPrivate() {
   return ok;
 }
 
+bool testSqliteRemoveOlderThanRemovesOldUnpinned() {
+  const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-test-retention.db";
+  std::filesystem::remove(path);
+  SqliteHistoryRepository repo(path.string());
+
+  auto pinned = repo.add(makeTextItem("keep pinned", 1000));
+  (void)repo.setPinned(pinned.id, true);
+  (void)repo.add(makeTextItem("drop old", 2000));
+  (void)repo.add(makeTextItem("keep new", 4000));
+
+  repo.removeOlderThan(3000);
+  const auto listed = repo.list(10);
+
+  bool ok = true;
+  ok = expect(listed.size() == 2, "removeOlderThan should drop only old unpinned rows") && ok;
+
+  std::filesystem::remove(path);
+  return ok;
+}
+
 }  // namespace
 
 int main() {
   bool ok = true;
   ok = testSqliteDeduplicatesByMimeAndPayload() && ok;
+  ok = testSqliteAllowsNonConsecutiveDuplicateEntries() && ok;
   ok = testSqlitePinnedItemsFirst() && ok;
   ok = testSqlitePersistsAcrossInstances() && ok;
   ok = testSqliteTrimToLimitRemovesOldest() && ok;
   ok = testSqliteTrimToLimitKeepsPinnedItems() && ok;
   ok = testSqliteClearUnpinnedPreservesPinnedRows() && ok;
   ok = testSqliteDatabaseFileIsPrivate() && ok;
+  ok = testSqliteRemoveOlderThanRemovesOldUnpinned() && ok;
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

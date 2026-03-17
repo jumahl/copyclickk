@@ -2,13 +2,21 @@
 
 Clipboard manager for KDE Plasma with tray integration, image previews, persistent history, and configurable shortcuts.
 
-![CopyClickk Logo](assets/icons/app/app.png)
+<p align="center">
+	<img src="assets/icons/app/app.png" alt="CopyClickk Logo" width="140" />
+</p>
 
-![Platform](https://img.shields.io/badge/Platform-Linux-blue)
-![Desktop](https://img.shields.io/badge/Desktop-KDE%20Plasma-1f6feb)
-![Toolkit](https://img.shields.io/badge/Qt-6-41cd52)
-![Language](https://img.shields.io/badge/C%2B%2B-20-00599C)
-![Storage](https://img.shields.io/badge/Storage-SQLite-003B57)
+<p align="center">
+	<strong>Fast clipboard history for KDE workflows</strong>
+</p>
+
+<p align="center">
+	<img alt="Platform" src="https://img.shields.io/badge/Platform-Linux-blue" />
+	<img alt="Desktop" src="https://img.shields.io/badge/Desktop-KDE%20Plasma-1f6feb" />
+	<img alt="Toolkit" src="https://img.shields.io/badge/Qt-6-41cd52" />
+	<img alt="Language" src="https://img.shields.io/badge/C%2B%2B-20-00599C" />
+	<img alt="Storage" src="https://img.shields.io/badge/Storage-SQLite-003B57" />
+</p>
 
 ## Why CopyClickk
 
@@ -22,16 +30,51 @@ CopyClickk is a KDE-focused clipboard manager designed to be practical, fast, an
 - Thumbnail preview in history list
 - Persistent history in SQLite (`~/.local/share/copyclickk/history.db`)
 - Configurable history limit (default `30`) with auto-eviction of oldest entries
-- Configurable open-history shortcut
+- Retention policy presets: `Always`, `1 week`, `1 month`, `3 months`, `6 months`
+- Optional skip of consecutive duplicate clipboard entries
+- Configurable open-history shortcut with safe fallback to `Ctrl+Alt+V`
+- Optional plain-text paste mode for text/HTML/URI entries
+- Image handling controls: save images on/off, optional JPEG compression, compression quality
+- Start-with-system toggle (autostart file in `~/.config/autostart/copyclickk.desktop`)
+- Clear-history confirmation toggle
+- Theme selection: `System`, `Light`, `Dark`
+- `Reset to Defaults` action in Settings dialog
 - Settings persisted in `~/.config/copyclickk/settings.ini`
 
 ## Screens and UX
 
 - Tray icon with quick menu actions
-- Click tray icon to open clipboard history
+- Tray click toggles history visibility (open/close)
+- Open-history shortcut toggles history visibility (open/close)
 - Image entries shown with thumbnail preview
-- Long text entries truncated for cleaner list visualization
-- Settings dialog for history limit, preview size, and shortcut
+- HTML clipboard previews are rendered as plain text in the list
+- Long text entries are truncated for cleaner list visualization
+- Taller history rows improve readability
+- Settings dialog is grouped by sections: `History`, `Clipboard`, `Images`, `System`, `Appearance`, `Shortcuts`
+
+## Settings Overview
+
+- `History`:
+  - history limit
+  - retention period presets
+  - skip consecutive duplicates
+- `Clipboard`:
+  - paste as plain text
+  - confirm before clear clipboard
+- `Images`:
+  - preview size
+  - save image entries
+  - compress images
+  - JPEG compression quality
+- `System`:
+  - start with system
+- `Appearance`:
+  - theme (`System`, `Light`, `Dark`)
+- `Shortcuts`:
+  - open history shortcut
+- `Reset to Defaults`:
+  - resets form values to default settings
+  - changes are saved only after pressing `OK`
 
 ## Quick Install (User Scope)
 
@@ -81,9 +124,8 @@ The uninstall script:
 
 - removes installed app files (`binary`, `desktop entry`, copied assets)
 - asks whether to delete user data and settings
-- optionally deletes:
-- `~/.local/share/copyclickk`
-- `~/.config/copyclickk`
+- optionally deletes `~/.local/share/copyclickk`
+- optionally deletes `~/.config/copyclickk`
 
 ## Compatibility
 

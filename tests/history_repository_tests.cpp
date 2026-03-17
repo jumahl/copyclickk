@@ -42,6 +42,20 @@ bool testDeduplicatesIdenticalPayloadAndMime() {
   return ok;
 }
 
+bool testAllowsNonConsecutiveDuplicateEntries() {
+  InMemoryHistoryRepository repo;
+
+  auto first = repo.add(makeTextItem("hello", 1000));
+  (void)repo.add(makeTextItem("other", 1500));
+  auto third = repo.add(makeTextItem("hello", 2000));
+
+  auto listed = repo.list(10);
+  bool ok = true;
+  ok = expect(first.id != third.id, "non-consecutive duplicates should create a new entry") && ok;
+  ok = expect(listed.size() == 3, "history should keep non-consecutive duplicates") && ok;
+  return ok;
+}
+
 bool testPinnedItemsAppearBeforeNonPinned() {
   InMemoryHistoryRepository repo;
 
@@ -108,15 +122,35 @@ bool testClearUnpinnedPreservesPinnedItems() {
   return ok;
 }
 
+bool testRemoveOlderThanRemovesOnlyOldUnpinned() {
+  InMemoryHistoryRepository repo;
+  auto oldPinned = repo.add(makeTextItem("keep pinned", 1000));
+  (void)repo.setPinned(oldPinned.id, true);
+  (void)repo.add(makeTextItem("drop old", 2000));
+  (void)repo.add(makeTextItem("keep new", 4000));
+
+  repo.removeOlderThan(3000);
+  const auto listed = repo.list(10);
+
+  bool ok = true;
+  ok = expect(listed.size() == 2, "removeOlderThan should remove old unpinned entries") && ok;
+  ok = expect(std::string(listed[0].payload.begin(), listed[0].payload.end()) == "keep pinned" ||
+                  std::string(listed[1].payload.begin(), listed[1].payload.end()) == "keep pinned",
+              "old pinned entry should remain") && ok;
+  return ok;
+}
+
 }  // namespace
 
 int main() {
   bool ok = true;
   ok = testDeduplicatesIdenticalPayloadAndMime() && ok;
+  ok = testAllowsNonConsecutiveDuplicateEntries() && ok;
   ok = testPinnedItemsAppearBeforeNonPinned() && ok;
   ok = testTrimToLimitRemovesOldestEntries() && ok;
   ok = testTrimToLimitNeverDeletesPinnedItems() && ok;
   ok = testClearUnpinnedPreservesPinnedItems() && ok;
+  ok = testRemoveOlderThanRemovesOnlyOldUnpinned() && ok;
 
   if (!ok) {
     return EXIT_FAILURE;

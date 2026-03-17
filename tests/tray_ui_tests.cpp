@@ -141,6 +141,15 @@ bool testSettingsPersistenceRoundTrip() {
   settings.setHistoryLimit(30);
   settings.setThumbnailSizePx(64);
   settings.setOpenHistoryShortcut("Ctrl+Shift+H");
+  settings.setRetentionDays(30);
+  settings.setSkipConsecutiveDuplicates(true);
+  settings.setPasteAsPlainText(true);
+  settings.setSaveImages(false);
+  settings.setCompressImages(true);
+  settings.setImageCompressionQuality(70);
+  settings.setStartAtLogin(true);
+  settings.setConfirmBeforeClearAll(false);
+  settings.setTheme("dark");
 
   bool ok = expect(settings.saveToFile(path.string()), "saveToFile should succeed") && true;
 
@@ -149,6 +158,15 @@ bool testSettingsPersistenceRoundTrip() {
   ok = expect(loaded.historyLimit() == 30, "history limit should persist") && ok;
   ok = expect(loaded.thumbnailSizePx() == 64, "thumbnail size should persist") && ok;
   ok = expect(loaded.openHistoryShortcut() == "Ctrl+Shift+H", "shortcut should persist") && ok;
+  ok = expect(loaded.retentionDays() == 30, "retention days should persist") && ok;
+  ok = expect(loaded.skipConsecutiveDuplicates(), "skip duplicates should persist") && ok;
+  ok = expect(loaded.pasteAsPlainText(), "plain text paste setting should persist") && ok;
+  ok = expect(!loaded.saveImages(), "save images setting should persist") && ok;
+  ok = expect(loaded.compressImages(), "compress images setting should persist") && ok;
+  ok = expect(loaded.imageCompressionQuality() == 70, "image compression quality should persist") && ok;
+  ok = expect(loaded.startAtLogin(), "start at login setting should persist") && ok;
+  ok = expect(!loaded.confirmBeforeClearAll(), "clear confirmation setting should persist") && ok;
+  ok = expect(loaded.theme() == "dark", "theme setting should persist") && ok;
 
   std::error_code ec;
   const auto status = std::filesystem::status(path, ec);

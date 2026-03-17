@@ -2,16 +2,23 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QComboBox>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDialogButtonBox>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QKeySequenceEdit>
 #include <QLabel>
+#include <QMessageBox>
 #include <QMimeData>
+#include <QPalette>
 #include <QPushButton>
 #include <QStyle>
+#include <QStyleFactory>
 #include <QTextDocumentFragment>
 #include <QToolButton>
 #include <QUrl>
@@ -28,8 +35,10 @@
 #include <QSize>
 #include <QString>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 #ifdef COPYCLICKK_HAS_KGLOBALACCEL
 #include <KGlobalAccel>
@@ -174,6 +183,96 @@ std::string defaultSettingsFilePath() {
   return baseDir + "/settings.ini";
 }
 
+std::string autostartDesktopFilePath() {
+  const char* home = std::getenv("HOME");
+  const std::string baseDir = home != nullptr ? std::string(home) + "/.config/autostart" : ".";
+  std::error_code ec;
+  std::filesystem::create_directories(baseDir, ec);
+  std::filesystem::permissions(baseDir,
+                               std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace,
+                               ec);
+  return baseDir + "/copyclickk.desktop";
+}
+
+void writeAutostartFile(const std::string& desktopFilePath) {
+  std::ofstream output(desktopFilePath, std::ios::trunc);
+  if (!output.is_open()) {
+    return;
+  }
+
+  const QString executable = QCoreApplication::applicationFilePath();
+  output << "[Desktop Entry]\n";
+  output << "Type=Application\n";
+  output << "Version=1.0\n";
+  output << "Name=CopyClickk\n";
+  output << "Exec=\"" << executable.toStdString() << "\"\n";
+  output << "X-GNOME-Autostart-enabled=true\n";
+  output << "Terminal=false\n";
+
+  output.flush();
+  if (!output.good()) {
+    return;
+  }
+
+  std::error_code ec;
+  std::filesystem::permissions(desktopFilePath,
+                               std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace,
+                               ec);
+}
+
+QPalette darkPalette() {
+  QPalette palette;
+  palette.setColor(QPalette::Window, QColor(37, 37, 38));
+  palette.setColor(QPalette::WindowText, QColor(220, 220, 220));
+  palette.setColor(QPalette::Base, QColor(30, 30, 30));
+  palette.setColor(QPalette::AlternateBase, QColor(45, 45, 45));
+  palette.setColor(QPalette::ToolTipBase, QColor(240, 240, 240));
+  palette.setColor(QPalette::ToolTipText, QColor(20, 20, 20));
+  palette.setColor(QPalette::Text, QColor(220, 220, 220));
+  palette.setColor(QPalette::Button, QColor(45, 45, 45));
+  palette.setColor(QPalette::ButtonText, QColor(220, 220, 220));
+  palette.setColor(QPalette::Highlight, QColor(64, 128, 255));
+  palette.setColor(QPalette::HighlightedText, QColor(255, 255, 255));
+  return palette;
+}
+
+QPalette lightPalette() {
+  QPalette palette;
+  palette.setColor(QPalette::Window, QColor(250, 250, 250));
+  palette.setColor(QPalette::WindowText, QColor(30, 30, 30));
+  palette.setColor(QPalette::Base, QColor(255, 255, 255));
+  palette.setColor(QPalette::AlternateBase, QColor(245, 245, 245));
+  palette.setColor(QPalette::ToolTipBase, QColor(255, 255, 255));
+  palette.setColor(QPalette::ToolTipText, QColor(20, 20, 20));
+  palette.setColor(QPalette::Text, QColor(30, 30, 30));
+  palette.setColor(QPalette::Button, QColor(245, 245, 245));
+  palette.setColor(QPalette::ButtonText, QColor(30, 30, 30));
+  palette.setColor(QPalette::Highlight, QColor(50, 120, 220));
+  palette.setColor(QPalette::HighlightedText, QColor(255, 255, 255));
+  return palette;
+}
+
+const QString& systemStyleName() {
+  static const QString styleName = QApplication::style() != nullptr ? QApplication::style()->objectName() : "";
+  return styleName;
+}
+
+const QPalette& systemPalette() {
+  static const QPalette palette = QApplication::palette();
+  return palette;
+}
+
+std::int64_t retentionCutoffTimestampMs(int retentionDays) {
+  if (retentionDays <= 0) {
+    return 0;
+  }
+
+  constexpr std::int64_t kDayMs = 24LL * 60LL * 60LL * 1000LL;
+  return QDateTime::currentMSecsSinceEpoch() - static_cast<std::int64_t>(retentionDays) * kDayMs;
+}
+
 }  // namespace
 
 TrayAppController::TrayAppController(std::shared_ptr<IHistoryRepository> repository, QObject* parent)
@@ -183,12 +282,15 @@ TrayAppController::TrayAppController(std::shared_ptr<IHistoryRepository> reposit
       trayViewModel_(service_, settings_),
       settingsFilePath_(defaultSettingsFilePath()) {
   loadSettings();
+  applyTheme();
+  applyStartupEntry();
 }
 
 void TrayAppController::start() {
   createTray();
   QObject::connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this]() { onClipboardChanged(); });
   registerOpenHistoryShortcut();
+  enforceRetentionPolicy();
   trayIcon_.show();
 }
 
@@ -213,6 +315,17 @@ void TrayAppController::onShowHistoryTriggered() {
 }
 
 void TrayAppController::onClearClipboardTriggered() {
+  if (settings_.confirmBeforeClearAll()) {
+    const auto result = QMessageBox::question(historyWindow_,
+                                              "Clear Clipboard History",
+                                              "Delete all unpinned clipboard items?",
+                                              QMessageBox::Yes | QMessageBox::No,
+                                              QMessageBox::No);
+    if (result != QMessageBox::Yes) {
+      return;
+    }
+  }
+
   trayViewModel_.onClearClipboardClicked();
   suppressClipboardCapture_ = true;
   QApplication::clipboard()->clear();
@@ -246,6 +359,11 @@ void TrayAppController::onClipboardChanged() {
   ClipboardItem item;
   const QMimeData* mimeData = QApplication::clipboard()->mimeData();
   if (!buildClipboardItemFromMimeData(mimeData, &item)) {
+    return;
+  }
+
+  enforceRetentionPolicy();
+  if (settings_.skipConsecutiveDuplicates() && isConsecutiveDuplicate(item)) {
     return;
   }
 
@@ -329,7 +447,8 @@ void TrayAppController::applyItemToClipboard(std::int64_t itemId) {
     return;
   }
 
-  QMimeData* mimeData = mimeDataFromItem(*item);
+  ClipboardItem selected = *item;
+  QMimeData* mimeData = mimeDataFromItem(selected);
   if (mimeData == nullptr) {
     return;
   }
@@ -341,6 +460,13 @@ void TrayAppController::applyItemToClipboard(std::int64_t itemId) {
 
 QMimeData* TrayAppController::mimeDataFromItem(const ClipboardItem& item) const {
   auto* mimeData = new QMimeData();
+
+  if (settings_.pasteAsPlainText() &&
+      (item.mimeType == ClipboardMimeType::TextPlain || item.mimeType == ClipboardMimeType::TextHtml ||
+       item.mimeType == ClipboardMimeType::TextUriList)) {
+    mimeData->setText(previewTextForItem(item));
+    return mimeData;
+  }
 
   if (item.mimeType == ClipboardMimeType::TextPlain) {
     mimeData->setText(QString::fromUtf8(reinterpret_cast<const char*>(item.payload.data()),
@@ -388,34 +514,146 @@ void TrayAppController::ensureSettingsDialog() {
 
   auto* dialog = new SettingsDialog();
   dialog->setWindowTitle("Settings");
-  dialog->resize(320, 180);
+  dialog->resize(460, 640);
 
   auto* layout = new QVBoxLayout(dialog);
-  layout->addWidget(new QLabel("Clipboard history limit", dialog));
 
-  historyLimitSpinBox_ = new QSpinBox(dialog);
+  auto* historySection = new QGroupBox("History", dialog);
+  auto* historyLayout = new QVBoxLayout(historySection);
+  historyLayout->addWidget(new QLabel("Clipboard history limit", historySection));
+  historyLimitSpinBox_ = new QSpinBox(historySection);
   historyLimitSpinBox_->setRange(1, 5000);
-  historyLimitSpinBox_->setValue(settings_.historyLimit());
-  layout->addWidget(historyLimitSpinBox_);
+  historyLayout->addWidget(historyLimitSpinBox_);
 
-  layout->addWidget(new QLabel("Image preview size", dialog));
-  thumbnailSizeSpinBox_ = new QSpinBox(dialog);
+  historyLayout->addWidget(new QLabel("Retention period", historySection));
+  retentionPeriodComboBox_ = new QComboBox(historySection);
+  retentionPeriodComboBox_->addItem("Always", 0);
+  retentionPeriodComboBox_->addItem("1 week (7 days)", 7);
+  retentionPeriodComboBox_->addItem("1 month (30 days)", 30);
+  retentionPeriodComboBox_->addItem("3 months (90 days)", 90);
+  retentionPeriodComboBox_->addItem("6 months (180 days)", 180);
+  historyLayout->addWidget(retentionPeriodComboBox_);
+
+  skipConsecutiveDuplicatesCheckBox_ = new QCheckBox("Skip consecutive duplicates", historySection);
+  historyLayout->addWidget(skipConsecutiveDuplicatesCheckBox_);
+  layout->addWidget(historySection);
+
+  auto* clipboardSection = new QGroupBox("Clipboard", dialog);
+  auto* clipboardLayout = new QVBoxLayout(clipboardSection);
+  pasteAsPlainTextCheckBox_ = new QCheckBox("Paste text items as plain text", clipboardSection);
+  clipboardLayout->addWidget(pasteAsPlainTextCheckBox_);
+  confirmClearAllCheckBox_ = new QCheckBox("Ask confirmation before Clear Clipboard", clipboardSection);
+  clipboardLayout->addWidget(confirmClearAllCheckBox_);
+  layout->addWidget(clipboardSection);
+
+  auto* imagesSection = new QGroupBox("Images", dialog);
+  auto* imagesLayout = new QVBoxLayout(imagesSection);
+  imagesLayout->addWidget(new QLabel("Image preview size", imagesSection));
+  thumbnailSizeSpinBox_ = new QSpinBox(imagesSection);
   thumbnailSizeSpinBox_->setRange(16, 128);
-  thumbnailSizeSpinBox_->setValue(settings_.thumbnailSizePx());
-  layout->addWidget(thumbnailSizeSpinBox_);
+  imagesLayout->addWidget(thumbnailSizeSpinBox_);
 
-  layout->addWidget(new QLabel(QString::fromStdString(trayViewModel_.openHistoryShortcutLabel()), dialog));
-  openHistoryShortcutEdit_ = new QKeySequenceEdit(dialog);
-  openHistoryShortcutEdit_->setKeySequence(QKeySequence(QString::fromStdString(trayViewModel_.openHistoryShortcut())));
-  layout->addWidget(openHistoryShortcutEdit_);
+  saveImagesCheckBox_ = new QCheckBox("Save image entries", imagesSection);
+  imagesLayout->addWidget(saveImagesCheckBox_);
+  compressImagesCheckBox_ = new QCheckBox("Compress saved images", imagesSection);
+  imagesLayout->addWidget(compressImagesCheckBox_);
+  imagesLayout->addWidget(new QLabel("Image compression quality (JPEG)", imagesSection));
+  imageCompressionQualitySpinBox_ = new QSpinBox(imagesSection);
+  imageCompressionQualitySpinBox_->setRange(30, 100);
+  imagesLayout->addWidget(imageCompressionQualitySpinBox_);
+  layout->addWidget(imagesSection);
+
+  auto* startupSection = new QGroupBox("System", dialog);
+  auto* startupLayout = new QVBoxLayout(startupSection);
+  startAtLoginCheckBox_ = new QCheckBox("Start with system", startupSection);
+  startupLayout->addWidget(startAtLoginCheckBox_);
+  layout->addWidget(startupSection);
+
+  auto* appearanceSection = new QGroupBox("Appearance", dialog);
+  auto* appearanceLayout = new QVBoxLayout(appearanceSection);
+  appearanceLayout->addWidget(new QLabel("Theme", appearanceSection));
+  themeComboBox_ = new QComboBox(appearanceSection);
+  themeComboBox_->addItem("System", QStringLiteral("system"));
+  themeComboBox_->addItem("Light", QStringLiteral("light"));
+  themeComboBox_->addItem("Dark", QStringLiteral("dark"));
+  appearanceLayout->addWidget(themeComboBox_);
+  layout->addWidget(appearanceSection);
+
+  auto* shortcutSection = new QGroupBox("Shortcuts", dialog);
+  auto* shortcutLayout = new QVBoxLayout(shortcutSection);
+  shortcutLayout->addWidget(new QLabel(QString::fromStdString(trayViewModel_.openHistoryShortcutLabel()), shortcutSection));
+  openHistoryShortcutEdit_ = new QKeySequenceEdit(shortcutSection);
+  shortcutLayout->addWidget(openHistoryShortcutEdit_);
+  layout->addWidget(shortcutSection);
+
+  auto applySettingsToControls = [this](const SettingsModel& model) {
+    historyLimitSpinBox_->setValue(model.historyLimit());
+    thumbnailSizeSpinBox_->setValue(model.thumbnailSizePx());
+
+    const int configuredRetentionDays = model.retentionDays();
+    int retentionIndex = retentionPeriodComboBox_->findData(configuredRetentionDays);
+    if (retentionIndex < 0) {
+      retentionPeriodComboBox_->addItem(QString("Custom (%1 days)").arg(configuredRetentionDays), configuredRetentionDays);
+      retentionIndex = retentionPeriodComboBox_->count() - 1;
+    }
+    retentionPeriodComboBox_->setCurrentIndex(retentionIndex);
+
+    skipConsecutiveDuplicatesCheckBox_->setChecked(model.skipConsecutiveDuplicates());
+    pasteAsPlainTextCheckBox_->setChecked(model.pasteAsPlainText());
+    saveImagesCheckBox_->setChecked(model.saveImages());
+    compressImagesCheckBox_->setChecked(model.compressImages());
+    imageCompressionQualitySpinBox_->setValue(model.imageCompressionQuality());
+    startAtLoginCheckBox_->setChecked(model.startAtLogin());
+    confirmClearAllCheckBox_->setChecked(model.confirmBeforeClearAll());
+
+    const int themeIndex = themeComboBox_->findData(QString::fromStdString(model.theme()));
+    themeComboBox_->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
+    openHistoryShortcutEdit_->setKeySequence(QKeySequence(QString::fromStdString(model.openHistoryShortcut())));
+  };
+  applySettingsToControls(settings_);
+
+  auto updateImageControls = [this]() {
+    const bool saveImages = saveImagesCheckBox_ != nullptr && saveImagesCheckBox_->isChecked();
+    const bool compressImages = compressImagesCheckBox_ != nullptr && compressImagesCheckBox_->isChecked();
+    if (compressImagesCheckBox_ != nullptr) {
+      compressImagesCheckBox_->setEnabled(saveImages);
+    }
+    if (imageCompressionQualitySpinBox_ != nullptr) {
+      imageCompressionQualitySpinBox_->setEnabled(saveImages && compressImages);
+    }
+  };
+  QObject::connect(saveImagesCheckBox_, &QCheckBox::toggled, dialog, [updateImageControls](bool) { updateImageControls(); });
+  QObject::connect(compressImagesCheckBox_,
+                   &QCheckBox::toggled,
+                   dialog,
+                   [updateImageControls](bool) { updateImageControls(); });
+  updateImageControls();
 
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
+  auto* resetButton = buttons->addButton("Reset to Defaults", QDialogButtonBox::ResetRole);
   layout->addWidget(buttons);
+
+  QObject::connect(resetButton, &QPushButton::clicked, dialog, [applySettingsToControls]() {
+    const SettingsModel defaults;
+    applySettingsToControls(defaults);
+  });
 
   QObject::connect(buttons, &QDialogButtonBox::accepted, dialog, [this, dialog]() {
     trayViewModel_.updateHistoryLimit(historyLimitSpinBox_->value());
     settings_.setThumbnailSizePx(thumbnailSizeSpinBox_->value());
+    settings_.setRetentionDays(retentionPeriodComboBox_->currentData().toInt());
+    settings_.setSkipConsecutiveDuplicates(skipConsecutiveDuplicatesCheckBox_->isChecked());
+    settings_.setPasteAsPlainText(pasteAsPlainTextCheckBox_->isChecked());
+    settings_.setSaveImages(saveImagesCheckBox_->isChecked());
+    settings_.setCompressImages(compressImagesCheckBox_->isChecked());
+    settings_.setImageCompressionQuality(imageCompressionQualitySpinBox_->value());
+    settings_.setStartAtLogin(startAtLoginCheckBox_->isChecked());
+    settings_.setConfirmBeforeClearAll(confirmClearAllCheckBox_->isChecked());
+    settings_.setTheme(themeComboBox_->currentData().toString().toStdString());
     trayViewModel_.updateOpenHistoryShortcut(openHistoryShortcutEdit_->keySequence().toString().toStdString());
+    enforceRetentionPolicy();
+    applyTheme();
+    applyStartupEntry();
     registerOpenHistoryShortcut();
     saveSettings();
     dialog->accept();
@@ -516,16 +754,10 @@ bool TrayAppController::buildClipboardItemFromMimeData(const QMimeData* mimeData
   item->timestampMs = QDateTime::currentMSecsSinceEpoch();
   item->sourceApp = "qt-app";
 
-  if (mimeData->hasImage()) {
+  if (settings_.saveImages() && mimeData->hasImage()) {
     const QImage image = qvariant_cast<QImage>(mimeData->imageData());
     if (!image.isNull()) {
-      QByteArray bytes;
-      QBuffer buffer(&bytes);
-      buffer.open(QIODevice::WriteOnly);
-      image.save(&buffer, "PNG");
-      item->mimeType = ClipboardMimeType::ImagePng;
-      item->payload.assign(bytes.begin(), bytes.end());
-      return !item->payload.empty();
+      return encodeImageToItem(image, item);
     }
   }
 
@@ -533,18 +765,13 @@ bool TrayAppController::buildClipboardItemFromMimeData(const QMimeData* mimeData
     const auto urls = mimeData->urls();
     if (!urls.isEmpty()) {
       const auto first = urls.first();
-      if (first.isLocalFile()) {
+      if (settings_.saveImages() && first.isLocalFile()) {
         const QString localPath = first.toLocalFile();
         QImageReader reader(localPath);
         if (reader.canRead()) {
-          QFile file(localPath);
-          if (file.open(QIODevice::ReadOnly)) {
-            const QByteArray bytes = file.readAll();
-            if (!bytes.isEmpty()) {
-              item->mimeType = imageMimeTypeFromSuffix(QFileInfo(localPath).suffix());
-              item->payload.assign(bytes.begin(), bytes.end());
-              return true;
-            }
+          const QImage image = reader.read();
+          if (!image.isNull()) {
+            return encodeImageToItem(image, item);
           }
         }
       }
@@ -595,7 +822,12 @@ void TrayAppController::registerOpenHistoryShortcut() {
                      &TrayAppController::onToggleHistoryShortcutTriggered);
   }
 
-  const auto sequence = QKeySequence(QString::fromStdString(trayViewModel_.openHistoryShortcut()));
+  QKeySequence sequence = QKeySequence(QString::fromStdString(trayViewModel_.openHistoryShortcut()));
+  if (sequence.isEmpty()) {
+    sequence = QKeySequence(QStringLiteral("Ctrl+Alt+V"));
+    trayViewModel_.updateOpenHistoryShortcut(sequence.toString().toStdString());
+    saveSettings();
+  }
   QList<QKeySequence> shortcuts;
   if (!sequence.isEmpty()) {
     shortcuts.push_back(sequence);
@@ -614,7 +846,12 @@ void TrayAppController::registerOpenHistoryShortcut() {
     openHistoryShortcut_ = nullptr;
   }
 
-  const auto sequence = QKeySequence(QString::fromStdString(trayViewModel_.openHistoryShortcut()));
+  QKeySequence sequence = QKeySequence(QString::fromStdString(trayViewModel_.openHistoryShortcut()));
+  if (sequence.isEmpty()) {
+    sequence = QKeySequence(QStringLiteral("Ctrl+Alt+V"));
+    trayViewModel_.updateOpenHistoryShortcut(sequence.toString().toStdString());
+    saveSettings();
+  }
   if (sequence.isEmpty()) {
     return;
   }
@@ -626,6 +863,92 @@ void TrayAppController::registerOpenHistoryShortcut() {
                    this,
                    &TrayAppController::onToggleHistoryShortcutTriggered);
 #endif
+}
+
+void TrayAppController::applyTheme() {
+  if (settings_.theme() == "dark") {
+    QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    QApplication::setPalette(darkPalette());
+  } else if (settings_.theme() == "light") {
+    QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    QApplication::setPalette(lightPalette());
+  } else {
+    const QString styleName = systemStyleName();
+    if (!styleName.isEmpty()) {
+      QApplication::setStyle(QStyleFactory::create(styleName));
+    }
+    QApplication::setPalette(systemPalette());
+  }
+
+  for (QWidget* topLevel : QApplication::topLevelWidgets()) {
+    if (topLevel == nullptr) {
+      continue;
+    }
+    topLevel->setPalette(QApplication::palette());
+    topLevel->update();
+  }
+}
+
+void TrayAppController::applyStartupEntry() {
+  const std::string desktopFilePath = autostartDesktopFilePath();
+  if (settings_.startAtLogin()) {
+    writeAutostartFile(desktopFilePath);
+    return;
+  }
+
+  std::error_code ec;
+  std::filesystem::remove(desktopFilePath, ec);
+}
+
+void TrayAppController::enforceRetentionPolicy() {
+  const std::int64_t cutoff = retentionCutoffTimestampMs(settings_.retentionDays());
+  if (cutoff <= 0) {
+    return;
+  }
+  service_.removeOlderThan(cutoff);
+}
+
+bool TrayAppController::isConsecutiveDuplicate(const ClipboardItem& item) const {
+  const auto recent = service_.listRecent(static_cast<std::size_t>(settings_.historyLimit()));
+  if (recent.empty()) {
+    return false;
+  }
+
+  const auto latest = std::max_element(recent.begin(), recent.end(), [](const ClipboardItem& left, const ClipboardItem& right) {
+    return left.timestampMs < right.timestampMs;
+  });
+  if (latest == recent.end()) {
+    return false;
+  }
+
+  return latest->mimeType == item.mimeType && latest->payload == item.payload;
+}
+
+bool TrayAppController::encodeImageToItem(const QImage& image, ClipboardItem* item) const {
+  if (item == nullptr || image.isNull()) {
+    return false;
+  }
+
+  QByteArray bytes;
+  QBuffer buffer(&bytes);
+  if (!buffer.open(QIODevice::WriteOnly)) {
+    return false;
+  }
+
+  if (settings_.compressImages()) {
+    if (!image.save(&buffer, "JPEG", settings_.imageCompressionQuality())) {
+      return false;
+    }
+    item->mimeType = ClipboardMimeType::ImageJpeg;
+  } else {
+    if (!image.save(&buffer, "PNG")) {
+      return false;
+    }
+    item->mimeType = ClipboardMimeType::ImagePng;
+  }
+
+  item->payload.assign(bytes.begin(), bytes.end());
+  return !item->payload.empty();
 }
 
 void TrayAppController::loadSettings() {

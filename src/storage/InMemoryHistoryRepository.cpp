@@ -5,17 +5,19 @@
 namespace copyclickk {
 
 ClipboardItem InMemoryHistoryRepository::add(ClipboardItem item) {
-  const std::string newHash = item.contentHash();
-  auto existing = std::find_if(items_.begin(), items_.end(), [&](const ClipboardItem& current) {
-    return current.mimeType == item.mimeType && current.contentHash() == newHash;
-  });
+  if (!items_.empty()) {
+    const auto latest = std::max_element(items_.begin(), items_.end(), [](const ClipboardItem& left, const ClipboardItem& right) {
+      return left.timestampMs < right.timestampMs;
+    });
 
-  if (existing != items_.end()) {
-    existing->timestampMs = item.timestampMs;
-    if (existing->sourceApp.empty()) {
-      existing->sourceApp = item.sourceApp;
+    const std::string newHash = item.contentHash();
+    if (latest != items_.end() && latest->mimeType == item.mimeType && latest->contentHash() == newHash) {
+      latest->timestampMs = item.timestampMs;
+      if (latest->sourceApp.empty()) {
+        latest->sourceApp = item.sourceApp;
+      }
+      return *latest;
     }
-    return *existing;
   }
 
   item.id = nextId_++;
@@ -116,6 +118,12 @@ void InMemoryHistoryRepository::trimToLimit(std::size_t limit) {
 
   pinned.insert(pinned.end(), unpinned.begin(), unpinned.end());
   items_ = std::move(pinned);
+}
+
+void InMemoryHistoryRepository::removeOlderThan(std::int64_t cutoffTimestampMs) {
+  std::erase_if(items_, [cutoffTimestampMs](const ClipboardItem& item) {
+    return !item.pinned && item.timestampMs < cutoffTimestampMs;
+  });
 }
 
 }  // namespace copyclickk

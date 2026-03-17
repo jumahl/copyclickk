@@ -75,42 +75,41 @@ ClipboardItem SqliteHistoryRepository::add(ClipboardItem item) {
 
   const char* findSql =
       "SELECT id, timestamp_ms, mime_type, payload, source_app, pinned "
-      "FROM history WHERE content_hash = ?1 AND mime_type = ?2 LIMIT 1;";
+      "FROM history ORDER BY timestamp_ms DESC LIMIT 1;";
   if (sqlite3_prepare_v2(db_, findSql, -1, &findStmt, nullptr) != SQLITE_OK) {
     execOrThrow(db_, "ROLLBACK;");
     throw std::runtime_error(sqlite3_errmsg(db_));
   }
 
-  sqlite3_bind_text(findStmt, 1, hash.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int(findStmt, 2, static_cast<int>(item.mimeType));
-
   const int findRc = sqlite3_step(findStmt);
   if (findRc == SQLITE_ROW) {
     ClipboardItem existing = rowToItem(findStmt);
-    sqlite3_finalize(findStmt);
+    if (existing.mimeType == item.mimeType && existing.contentHash() == hash) {
+      sqlite3_finalize(findStmt);
 
-    sqlite3_stmt* updateStmt = nullptr;
-    const char* updateSql = "UPDATE history SET timestamp_ms = ?1 WHERE id = ?2;";
-    if (sqlite3_prepare_v2(db_, updateSql, -1, &updateStmt, nullptr) != SQLITE_OK) {
-      execOrThrow(db_, "ROLLBACK;");
-      throw std::runtime_error(sqlite3_errmsg(db_));
-    }
+      sqlite3_stmt* updateStmt = nullptr;
+      const char* updateSql = "UPDATE history SET timestamp_ms = ?1 WHERE id = ?2;";
+      if (sqlite3_prepare_v2(db_, updateSql, -1, &updateStmt, nullptr) != SQLITE_OK) {
+        execOrThrow(db_, "ROLLBACK;");
+        throw std::runtime_error(sqlite3_errmsg(db_));
+      }
 
-    sqlite3_bind_int64(updateStmt, 1, item.timestampMs);
-    sqlite3_bind_int64(updateStmt, 2, existing.id);
-    if (sqlite3_step(updateStmt) != SQLITE_DONE) {
+      sqlite3_bind_int64(updateStmt, 1, item.timestampMs);
+      sqlite3_bind_int64(updateStmt, 2, existing.id);
+      if (sqlite3_step(updateStmt) != SQLITE_DONE) {
+        sqlite3_finalize(updateStmt);
+        execOrThrow(db_, "ROLLBACK;");
+        throw std::runtime_error(sqlite3_errmsg(db_));
+      }
+
       sqlite3_finalize(updateStmt);
-      execOrThrow(db_, "ROLLBACK;");
-      throw std::runtime_error(sqlite3_errmsg(db_));
+      execOrThrow(db_, "COMMIT;");
+      existing.timestampMs = item.timestampMs;
+      return existing;
     }
-
-    sqlite3_finalize(updateStmt);
-    execOrThrow(db_, "COMMIT;");
-    existing.timestampMs = item.timestampMs;
-    return existing;
   }
 
-  if (findRc != SQLITE_DONE) {
+  if (findRc != SQLITE_DONE && findRc != SQLITE_ROW) {
     sqlite3_finalize(findStmt);
     execOrThrow(db_, "ROLLBACK;");
     throw std::runtime_error(sqlite3_errmsg(db_));
@@ -254,6 +253,22 @@ void SqliteHistoryRepository::trimToLimit(std::size_t limit) {
   sqlite3_finalize(stmt);
 }
 
+void SqliteHistoryRepository::removeOlderThan(std::int64_t cutoffTimestampMs) {
+  sqlite3_stmt* stmt = nullptr;
+  const char* sql = "DELETE FROM history WHERE pinned = 0 AND timestamp_ms < ?1;";
+  if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+    throw std::runtime_error(sqlite3_errmsg(db_));
+  }
+
+  sqlite3_bind_int64(stmt, 1, cutoffTimestampMs);
+  if (sqlite3_step(stmt) != SQLITE_DONE) {
+    sqlite3_finalize(stmt);
+    throw std::runtime_error(sqlite3_errmsg(db_));
+  }
+
+  sqlite3_finalize(stmt);
+}
+
 void SqliteHistoryRepository::initializeSchema() {
   execOrThrow(db_, "PRAGMA journal_mode=WAL;");
   execOrThrow(
@@ -268,7 +283,8 @@ void SqliteHistoryRepository::initializeSchema() {
       "content_hash TEXT NOT NULL"
       ");");
   execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_history_order ON history(pinned DESC, timestamp_ms DESC);");
-  execOrThrow(db_, "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_dedupe ON history(mime_type, content_hash);");
+  execOrThrow(db_, "DROP INDEX IF EXISTS idx_history_dedupe;");
+  execOrThrow(db_, "CREATE INDEX IF NOT EXISTS idx_history_hash ON history(mime_type, content_hash);");
 }
 
 }  // namespace copyclickk
