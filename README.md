@@ -2,6 +2,18 @@
 
 Clipboard manager for KDE Plasma with tray integration, image previews, persistent history, and configurable shortcuts.
 
+![CopyClickk Logo](assets/icons/app/app.png)
+
+![Platform](https://img.shields.io/badge/Platform-Linux-blue)
+![Desktop](https://img.shields.io/badge/Desktop-KDE%20Plasma-1f6feb)
+![Toolkit](https://img.shields.io/badge/Qt-6-41cd52)
+![Language](https://img.shields.io/badge/C%2B%2B-20-00599C)
+![Storage](https://img.shields.io/badge/Storage-SQLite-003B57)
+
+## Why CopyClickk
+
+CopyClickk is a KDE-focused clipboard manager designed to be practical, fast, and easy to run in daily workflows.
+
 ## Features
 
 - Tray app with menu actions in English: `Show History`, `Clear Clipboard`, `Settings`, `Quit`
@@ -12,6 +24,14 @@ Clipboard manager for KDE Plasma with tray integration, image previews, persiste
 - Configurable history limit (default `30`) with auto-eviction of oldest entries
 - Configurable open-history shortcut
 - Settings persisted in `~/.config/copyclickk/settings.ini`
+
+## Screens and UX
+
+- Tray icon with quick menu actions
+- Click tray icon to open clipboard history
+- Image entries shown with thumbnail preview
+- Long text entries truncated for cleaner list visualization
+- Settings dialog for history limit, preview size, and shortcut
 
 ## Quick Install (User Scope)
 
@@ -44,6 +64,13 @@ Optional: skip dependency installation prompt:
 ~/.local/bin/copyclickk_tray
 ```
 
+## One-Command Flow
+
+```bash
+chmod +x scripts/install.sh scripts/uninstall.sh
+./scripts/install.sh
+```
+
 ## Uninstall
 
 ```bash
@@ -57,6 +84,12 @@ The uninstall script:
 - optionally deletes:
 - `~/.local/share/copyclickk`
 - `~/.config/copyclickk`
+
+## Compatibility
+
+- Desktop target: KDE Plasma
+- Distros: Fedora, Arch, Debian/Ubuntu, openSUSE (best effort)
+- Wayland and X11: supported with behavior depending on compositor/session restrictions
 
 ## Manual Build (Dev)
 
@@ -99,6 +132,15 @@ Run local binary:
 ./build/src/uiqt/copyclickk_tray
 ```
 
+## Contributing
+
+Contributions are welcome.
+
+1. Read `CONTRIBUTING.md`
+2. Create a branch
+3. Add tests for behavior changes
+4. Open a pull request with clear notes
+
 ## Project Structure
 
 - `src/core`: domain models
@@ -113,14 +155,12 @@ Run local binary:
 - `scripts/uninstall.sh`: interactive uninstaller
 - `tests`: test suite
 
-## Contributing
+## Roadmap
 
-Contributions are welcome.
-
-1. Read `CONTRIBUTING.md`
-2. Create a branch
-3. Add tests for behavior changes
-4. Open a pull request with clear notes
+1. DBus adapter on top of `ClipboardService`
+2. Richer KDE integration for packaging and startup behavior
+3. QML-based history UI variant
+4. More privacy presets and exclusion rules
 
 ## Notes
 
