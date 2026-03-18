@@ -20,25 +20,27 @@ for arg in "$@"; do
 done
 
 install_deps_fedora() {
-  sudo dnf install -y cmake gcc-c++ ninja-build sqlite-devel qt6-qtbase-devel kf6-kglobalaccel-devel
+  sudo dnf install -y cmake gcc-c++ ninja-build sqlite-devel qt6-qtbase-devel kf6-kglobalaccel-devel kf6-kguiaddons-devel
 }
 
 install_deps_arch() {
-  sudo pacman -S --needed --noconfirm cmake gcc ninja sqlite qt6-base kglobalaccel
+  sudo pacman -S --needed --noconfirm cmake gcc ninja sqlite qt6-base kglobalaccel kguiaddons
 }
 
 install_deps_debian_like() {
   sudo apt update
-  sudo apt install -y cmake g++ ninja-build libsqlite3-dev qt6-base-dev libkf6globalaccel-dev || {
+  sudo apt install -y cmake g++ ninja-build libsqlite3-dev qt6-base-dev
+  sudo apt install -y libkf6globalaccel-dev libkf6guiaddons-dev || {
     echo "[copyclickk] Could not install one or more KDE6 packages automatically."
     echo "[copyclickk] Install at least: cmake g++ ninja-build libsqlite3-dev qt6-base-dev"
+    echo "[copyclickk] Optional but recommended: libkf6globalaccel-dev libkf6guiaddons-dev"
   }
 }
 
 install_deps_opensuse() {
-  sudo zypper install -y cmake gcc-c++ ninja sqlite3-devel qt6-base-devel kf6-kglobalaccel-devel || {
+  sudo zypper install -y cmake gcc-c++ ninja sqlite3-devel qt6-base-devel kf6-kglobalaccel-devel kf6-kguiaddons-devel || {
     echo "[copyclickk] Could not install one or more KDE6 packages automatically."
-    echo "[copyclickk] Search and install KF6 GlobalAccel dev package for your release."
+    echo "[copyclickk] Search and install KF6 GlobalAccel/GuiAddons dev packages for your release."
   }
 }
 
@@ -75,7 +77,7 @@ maybe_install_dependencies() {
       ;;
     *)
       echo "[copyclickk] Unsupported distro ID for auto deps: ${ID:-unknown}"
-      echo "[copyclickk] Please install manually: cmake, C++ compiler, sqlite dev, Qt6 dev, optional KF6 GlobalAccel dev."
+      echo "[copyclickk] Please install manually: cmake, C++ compiler, sqlite dev, Qt6 dev, optional KF6 GlobalAccel/GuiAddons dev."
       ;;
   esac
 }

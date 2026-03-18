@@ -2,9 +2,11 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
 #include <QKeySequenceEdit>
@@ -15,6 +17,7 @@
 #include <QShortcut>
 #include <QSpinBox>
 #include <QSystemTrayIcon>
+#include <QTimer>
 #include <QWidget>
 
 #include "../ipc/ClipboardService.h"
@@ -39,6 +42,7 @@ class TrayAppController : public QObject {
   void onSettingsTriggered();
   void onToggleHistoryShortcutTriggered();
   void onClipboardChanged();
+  void onClipboardModeChanged(QClipboard::Mode mode);
   void onHistoryItemActivated(QListWidgetItem* item);
 
   void createTray();
@@ -54,6 +58,7 @@ class TrayAppController : public QObject {
   void applyTheme();
   void applyStartupEntry();
   void enforceRetentionPolicy();
+  void processClipboardMode(QClipboard::Mode mode);
   [[nodiscard]] bool isConsecutiveDuplicate(const ClipboardItem& item) const;
   [[nodiscard]] bool encodeImageToItem(const QImage& image, ClipboardItem* item) const;
   bool buildClipboardItemFromMimeData(const QMimeData* mimeData, ClipboardItem* item) const;
@@ -88,7 +93,11 @@ class TrayAppController : public QObject {
   QPointer<QComboBox> themeComboBox_;
   QPointer<QWidget> shortcutHost_;
   QPointer<QShortcut> openHistoryShortcut_;
+  QPointer<QTimer> clipboardPollTimer_;
   bool suppressClipboardCapture_{false};
+  std::optional<ClipboardItem> lastCapturedItem_;
+  std::int64_t lastCaptureEventMs_{0};
+  std::int64_t lastRetentionSweepMs_{0};
   std::string settingsFilePath_;
 };
 

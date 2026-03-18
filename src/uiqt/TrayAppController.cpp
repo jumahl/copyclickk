@@ -44,6 +44,10 @@
 #include <KGlobalAccel>
 #endif
 
+#ifdef COPYCLICKK_HAS_KGUIADDONS
+#include <KSystemClipboard>
+#endif
+
 namespace copyclickk {
 
 namespace {
@@ -288,9 +292,32 @@ TrayAppController::TrayAppController(std::shared_ptr<IHistoryRepository> reposit
 
 void TrayAppController::start() {
   createTray();
+#ifdef COPYCLICKK_HAS_KGUIADDONS
+  QObject::connect(KSystemClipboard::instance(),
+                   &KSystemClipboard::changed,
+                   this,
+                   [this](QClipboard::Mode mode) { onClipboardModeChanged(mode); });
+#else
   QObject::connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this]() { onClipboardChanged(); });
+  QObject::connect(QApplication::clipboard(),
+                   &QClipboard::changed,
+                   this,
+                   [this](QClipboard::Mode mode) { onClipboardModeChanged(mode); });
+#endif
+
+  clipboardPollTimer_ = new QTimer(this);
+  clipboardPollTimer_->setInterval(75);
+  QObject::connect(clipboardPollTimer_, &QTimer::timeout, this, [this]() {
+    processClipboardMode(QClipboard::Clipboard);
+  });
+  clipboardPollTimer_->start();
+
   registerOpenHistoryShortcut();
   enforceRetentionPolicy();
+  const auto recent = service_.listRecent(1);
+  if (!recent.empty()) {
+    lastCapturedItem_ = recent.front();
+  }
   trayIcon_.show();
 }
 
@@ -352,24 +379,59 @@ void TrayAppController::onToggleHistoryShortcutTriggered() {
 }
 
 void TrayAppController::onClipboardChanged() {
+  processClipboardMode(QClipboard::Clipboard);
+}
+
+void TrayAppController::onClipboardModeChanged(QClipboard::Mode mode) {
+  processClipboardMode(mode);
+}
+
+void TrayAppController::processClipboardMode(QClipboard::Mode mode) {
+  // Only store regular clipboard updates. Monitoring primary selection can
+  // produce repeated/alternating entries on Wayland compositors.
+  if (mode != QClipboard::Clipboard) {
+    return;
+  }
+
   if (suppressClipboardCapture_) {
     return;
   }
 
   ClipboardItem item;
-  const QMimeData* mimeData = QApplication::clipboard()->mimeData();
+#ifdef COPYCLICKK_HAS_KGUIADDONS
+  const QMimeData* mimeData = KSystemClipboard::instance()->mimeData(mode);
+#else
+  const QMimeData* mimeData = QApplication::clipboard()->mimeData(mode);
+#endif
   if (!buildClipboardItemFromMimeData(mimeData, &item)) {
     return;
   }
 
-  enforceRetentionPolicy();
+  const std::int64_t nowMs = QDateTime::currentMSecsSinceEpoch();
+  if (nowMs - lastRetentionSweepMs_ >= 10'000) {
+    enforceRetentionPolicy();
+    lastRetentionSweepMs_ = nowMs;
+  }
+
   if (settings_.skipConsecutiveDuplicates() && isConsecutiveDuplicate(item)) {
     return;
+  }
+
+  // Some backends can emit duplicate notifications for the same content in a
+  // short burst. Ignore those rapid repeats even if duplicate setting is off.
+  if (isConsecutiveDuplicate(item)) {
+    constexpr std::int64_t kDuplicateBurstWindowMs = 1200;
+    if (nowMs - lastCaptureEventMs_ <= kDuplicateBurstWindowMs) {
+      return;
+    }
   }
 
   if (!service_.ingestWithLimit(item, static_cast<std::size_t>(settings_.historyLimit()))) {
     return;
   }
+
+  lastCapturedItem_ = item;
+  lastCaptureEventMs_ = nowMs;
 
   if (trayViewModel_.isHistoryVisible()) {
     refreshHistoryList();
@@ -761,6 +823,24 @@ bool TrayAppController::buildClipboardItemFromMimeData(const QMimeData* mimeData
     }
   }
 
+  if (mimeData->hasText()) {
+    const std::string text = mimeData->text().toStdString();
+    if (!text.empty()) {
+      item->mimeType = ClipboardMimeType::TextPlain;
+      item->payload.assign(text.begin(), text.end());
+      return true;
+    }
+  }
+
+  if (mimeData->hasHtml()) {
+    const std::string html = mimeData->html().toStdString();
+    if (!html.empty()) {
+      item->mimeType = ClipboardMimeType::TextHtml;
+      item->payload.assign(html.begin(), html.end());
+      return true;
+    }
+  }
+
   if (mimeData->hasUrls()) {
     const auto urls = mimeData->urls();
     if (!urls.isEmpty()) {
@@ -787,24 +867,6 @@ bool TrayAppController::buildClipboardItemFromMimeData(const QMimeData* mimeData
       item->mimeType = ClipboardMimeType::TextUriList;
       item->payload.assign(joined.begin(), joined.end());
       return !item->payload.empty();
-    }
-  }
-
-  if (mimeData->hasHtml()) {
-    const std::string html = mimeData->html().toStdString();
-    if (!html.empty()) {
-      item->mimeType = ClipboardMimeType::TextHtml;
-      item->payload.assign(html.begin(), html.end());
-      return true;
-    }
-  }
-
-  if (mimeData->hasText()) {
-    const std::string text = mimeData->text().toStdString();
-    if (!text.empty()) {
-      item->mimeType = ClipboardMimeType::TextPlain;
-      item->payload.assign(text.begin(), text.end());
-      return true;
     }
   }
 
@@ -909,19 +971,11 @@ void TrayAppController::enforceRetentionPolicy() {
 }
 
 bool TrayAppController::isConsecutiveDuplicate(const ClipboardItem& item) const {
-  const auto recent = service_.listRecent(static_cast<std::size_t>(settings_.historyLimit()));
-  if (recent.empty()) {
+  if (!lastCapturedItem_.has_value()) {
     return false;
   }
 
-  const auto latest = std::max_element(recent.begin(), recent.end(), [](const ClipboardItem& left, const ClipboardItem& right) {
-    return left.timestampMs < right.timestampMs;
-  });
-  if (latest == recent.end()) {
-    return false;
-  }
-
-  return latest->mimeType == item.mimeType && latest->payload == item.payload;
+  return lastCapturedItem_->mimeType == item.mimeType && lastCapturedItem_->payload == item.payload;
 }
 
 bool TrayAppController::encodeImageToItem(const QImage& image, ClipboardItem* item) const {
