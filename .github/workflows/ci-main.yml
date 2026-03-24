@@ -1,0 +1,72 @@
+name: CI Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: Build, Test & Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            g++ \
+            ccache \
+            libsqlite3-dev \
+            qt6-base-dev
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-main-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+          restore-keys: |
+            ccache-main-${{ runner.os }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCOPYCLICKK_BUILD_QT_TRAY_APP=ON \
+            -DCOPYCLICKK_BUILD_KDE_COMPONENTS=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Prepare package
+        run: |
+          mkdir -p dist/copyclickk
+          cp build/src/uiqt/copyclickk_tray dist/copyclickk/
+          cp -r assets dist/copyclickk/
+          tar -C dist -czf copyclickk-${{ github.sha }}-linux-x64.tar.gz copyclickk
+          sha256sum copyclickk-${{ github.sha }}-linux-x64.tar.gz > copyclickk-${{ github.sha }}-linux-x64.tar.gz.sha256
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copyclickk-linux-x64-${{ github.sha }}
+          path: |
+            copyclickk-${{ github.sha }}-linux-x64.tar.gz
+            copyclickk-${{ github.sha }}-linux-x64.tar.gz.sha256
+          retention-days: 14

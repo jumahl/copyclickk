@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            g++ \
+            libsqlite3-dev \
+            qt6-base-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCOPYCLICKK_BUILD_QT_TRAY_APP=ON \
+            -DCOPYCLICKK_BUILD_KDE_COMPONENTS=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package artifacts
+        id: package
+        run: |
+          VERSION="${GITHUB_REF_NAME:-manual}"
+          mkdir -p dist/copyclickk
+          cp build/src/uiqt/copyclickk_tray dist/copyclickk/
+          cp -r assets dist/copyclickk/
+          TAR_NAME="copyclickk-${VERSION}-linux-x64.tar.gz"
+          tar -C dist -czf "${TAR_NAME}" copyclickk
+          sha256sum "${TAR_NAME}" > "${TAR_NAME}.sha256"
+          echo "tar_name=${TAR_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.package.outputs.tar_name }}
+            ${{ steps.package.outputs.tar_name }}.sha256
+          generate_release_notes: true

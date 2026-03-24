@@ -1,0 +1,94 @@
+name: CI PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (RelWithDebInfo)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            g++ \
+            ccache \
+            libsqlite3-dev \
+            qt6-base-dev
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}-${{ github.ref_name }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}-
+            ccache-${{ runner.os }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCOPYCLICKK_BUILD_QT_TRAY_APP=ON \
+            -DCOPYCLICKK_BUILD_KDE_COMPONENTS=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: CCache stats
+        if: always()
+        run: ccache --show-stats || true
+
+  sanitizers:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            g++ \
+            libsqlite3-dev \
+            qt6-base-dev
+
+      - name: Configure sanitizer build
+        run: |
+          cmake -S . -B build-sanitizers -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCOPYCLICKK_BUILD_QT_TRAY_APP=ON \
+            -DCOPYCLICKK_BUILD_KDE_COMPONENTS=OFF \
+            -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' \
+            -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=address,undefined'
+
+      - name: Build sanitizer targets
+        run: cmake --build build-sanitizers --parallel
+
+      - name: Run tests with sanitizers
+        run: ctest --test-dir build-sanitizers --output-on-failure

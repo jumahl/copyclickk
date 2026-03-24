@@ -1,0 +1,70 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix-build-test:
+    name: Nightly Matrix (${{ matrix.name }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: tray-on
+            qt_tray: ON
+            kde_components: OFF
+            experimental: false
+          - name: tray-off
+            qt_tray: OFF
+            kde_components: OFF
+            experimental: false
+          - name: kde-components-experimental
+            qt_tray: ON
+            kde_components: ON
+            experimental: true
+
+    continue-on-error: ${{ matrix.experimental }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            g++ \
+            libsqlite3-dev \
+            qt6-base-dev
+
+      # KDE components are optional and can be unavailable depending on runner image state.
+      - name: Try install optional KDE dependencies
+        if: matrix.kde_components == 'ON'
+        run: |
+          sudo apt-get install -y libkf6globalaccel-dev || true
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCOPYCLICKK_BUILD_QT_TRAY_APP=${{ matrix.qt_tray }} \
+            -DCOPYCLICKK_BUILD_KDE_COMPONENTS=${{ matrix.kde_components }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
