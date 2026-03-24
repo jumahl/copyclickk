@@ -31,6 +31,24 @@ bool hasNoGroupOrOthersPermissions(std::filesystem::perms permissions) {
   return (permissions & publicBits) == std::filesystem::perms::none;
 }
 
+std::string permissionsToOctal(std::filesystem::perms perms) {
+  auto bit = [perms](std::filesystem::perms flag) {
+    return (perms & flag) != std::filesystem::perms::none ? 1 : 0;
+  };
+
+  const int owner = bit(std::filesystem::perms::owner_read) * 4 +
+                    bit(std::filesystem::perms::owner_write) * 2 +
+                    bit(std::filesystem::perms::owner_exec);
+  const int group = bit(std::filesystem::perms::group_read) * 4 +
+                    bit(std::filesystem::perms::group_write) * 2 +
+                    bit(std::filesystem::perms::group_exec);
+  const int others = bit(std::filesystem::perms::others_read) * 4 +
+                     bit(std::filesystem::perms::others_write) * 2 +
+                     bit(std::filesystem::perms::others_exec);
+
+  return std::to_string(owner) + std::to_string(group) + std::to_string(others);
+}
+
 bool testDefaultEnglishLabels() {
   auto repo = std::make_shared<InMemoryHistoryRepository>();
   ClipboardService service(repo, PrivacyRuleSet{});
@@ -171,9 +189,21 @@ bool testSettingsPersistenceRoundTrip() {
   std::error_code ec;
   const auto status = std::filesystem::status(path, ec);
   ok = expect(!ec, "status for settings file should be readable") && ok;
-  if (!ec) {
-    ok = expect(hasNoGroupOrOthersPermissions(status.permissions()),
+  if (!ec && std::filesystem::exists(path)) {
+    const auto perms = status.permissions();
+#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+    if (!hasNoGroupOrOthersPermissions(perms)) {
+      std::cerr << "INFO: settings permissions are " << permissionsToOctal(perms)
+                << " (expected owner-only like 600)\n";
+    }
+    ok = expect(hasNoGroupOrOthersPermissions(perms),
                 "settings file should not be readable by group/others") && ok;
+#else
+    if (!hasNoGroupOrOthersPermissions(perms)) {
+      std::cerr << "INFO: skipping strict POSIX permission assertion on non-POSIX platform; observed perms="
+                << permissionsToOctal(perms) << '\n';
+    }
+#endif
   }
 
   std::filesystem::remove(path);

@@ -55,6 +55,10 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Verbose test diagnostics on failure
+        if: failure()
+        run: ctest --test-dir build -VV --output-on-failure
+
       - name: CCache stats
         if: always()
         run: ccache --show-stats || true
@@ -92,3 +96,7 @@ jobs:
 
       - name: Run tests with sanitizers
         run: ctest --test-dir build-sanitizers --output-on-failure
+
+      - name: Verbose sanitizer diagnostics on failure
+        if: failure()
+        run: ctest --test-dir build-sanitizers -VV --output-on-failure

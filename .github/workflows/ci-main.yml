@@ -54,6 +54,10 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Verbose test diagnostics on failure
+        if: failure()
+        run: ctest --test-dir build -VV --output-on-failure
+
       - name: Prepare package
         run: |
           mkdir -p dist/copyclickk

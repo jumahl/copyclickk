@@ -227,7 +227,7 @@ bool SettingsModel::saveToFile(const std::string& filePath) const {
                                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
                                std::filesystem::perm_options::replace,
                                ec);
-  return true;
+  return !ec;
 }
 
 }  // namespace copyclickk
