@@ -62,6 +62,9 @@ jobs:
         if: failure()
         continue-on-error: true
         run: |
+          ls -l build/tests || true
+          file build/tests/copyclickk_ui_tests || true
+          ldd build/tests/copyclickk_ui_tests || true
           ctest --test-dir build -VV -R copyclickk_ui_tests --output-on-failure || true
           if [ -f build/Testing/Temporary/LastTest.log ]; then
             echo "--- build/Testing/Temporary/LastTest.log ---"
@@ -70,6 +73,9 @@ jobs:
           if [ -x build/tests/copyclickk_ui_tests ]; then
             echo "--- direct run: build/tests/copyclickk_ui_tests ---"
             build/tests/copyclickk_ui_tests || true
+            echo "--- direct run exit code: $? ---"
+          else
+            echo "ERROR: build/tests/copyclickk_ui_tests not executable or missing"
           fi
 
       - name: Upload CTest logs on failure

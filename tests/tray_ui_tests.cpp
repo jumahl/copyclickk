@@ -8,6 +8,10 @@
 #include <system_error>
 #include <thread>
 
+#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
+
 #include "../src/ipc/ClipboardService.h"
 #include "../src/storage/InMemoryHistoryRepository.h"
 #include "../src/ui/SettingsModel.h"
@@ -150,8 +154,9 @@ bool testSettingsAdjustHistoryLimit() {
   SettingsModel settings;
   TrayMenuViewModel tray(service, settings);
 
+  bool ok = true;
   tray.onSettingsClicked();
-  bool ok = expect(tray.isSettingsVisible(), "settings action should open settings view") && ok;
+  ok = expect(tray.isSettingsVisible(), "settings action should open settings view") && ok;
 
   tray.updateHistoryLimit(250);
   ok = expect(settings.historyLimit() == 250, "settings should update clipboard history limit") && ok;
@@ -224,15 +229,28 @@ bool testSettingsPersistenceRoundTrip() {
 }  // namespace
 
 int main() {
+#if defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+  constexpr const char* kStart = "INFO: copyclickk_ui_tests process started\n";
+  (void)::write(STDERR_FILENO, kStart, 41);
+#endif
+
   try {
+    auto runTest = [](const char* name, bool (*fn)()) {
+      std::cerr << "INFO: running " << name << '\n';
+      const bool result = fn();
+      std::cerr << "INFO: " << name << " => " << (result ? "PASS" : "FAIL") << '\n';
+      return result;
+    };
+
     bool ok = true;
-    ok = testDefaultEnglishLabels() && ok;
-    ok = testTrayClickOpensHistory() && ok;
-    ok = testClearClipboardActionClearsHistory() && ok;
-    ok = testClearClipboardPreservesPinnedItems() && ok;
-    ok = testPerItemPinAndDeleteActions() && ok;
-    ok = testSettingsAdjustHistoryLimit() && ok;
-    ok = testSettingsPersistenceRoundTrip() && ok;
+    ok = runTest("testDefaultEnglishLabels", &testDefaultEnglishLabels) && ok;
+    ok = runTest("testTrayClickOpensHistory", &testTrayClickOpensHistory) && ok;
+    ok = runTest("testClearClipboardActionClearsHistory", &testClearClipboardActionClearsHistory) && ok;
+    ok = runTest("testClearClipboardPreservesPinnedItems", &testClearClipboardPreservesPinnedItems) && ok;
+    ok = runTest("testPerItemPinAndDeleteActions", &testPerItemPinAndDeleteActions) && ok;
+    ok = runTest("testSettingsAdjustHistoryLimit", &testSettingsAdjustHistoryLimit) && ok;
+    ok = runTest("testSettingsPersistenceRoundTrip", &testSettingsPersistenceRoundTrip) && ok;
+    std::cerr << "INFO: copyclickk_ui_tests finished with status=" << (ok ? "PASS" : "FAIL") << '\n';
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
   } catch (const std::exception& ex) {
     std::cerr << "FATAL: uncaught exception in copyclickk_ui_tests: " << ex.what() << '\n';
