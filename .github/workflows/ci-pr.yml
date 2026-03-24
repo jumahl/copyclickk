@@ -61,7 +61,16 @@ jobs:
       - name: Verbose test diagnostics on failure
         if: failure()
         continue-on-error: true
-        run: ctest --test-dir build -VV -R copyclickk_ui_tests --output-on-failure || true
+        run: |
+          ctest --test-dir build -VV -R copyclickk_ui_tests --output-on-failure || true
+          if [ -f build/Testing/Temporary/LastTest.log ]; then
+            echo "--- build/Testing/Temporary/LastTest.log ---"
+            cat build/Testing/Temporary/LastTest.log
+          fi
+          if [ -x build/tests/copyclickk_ui_tests ]; then
+            echo "--- direct run: build/tests/copyclickk_ui_tests ---"
+            build/tests/copyclickk_ui_tests || true
+          fi
 
       - name: Upload CTest logs on failure
         if: failure()
@@ -116,7 +125,16 @@ jobs:
       - name: Verbose sanitizer diagnostics on failure
         if: failure()
         continue-on-error: true
-        run: ctest --test-dir build-sanitizers -VV -R copyclickk_ui_tests --output-on-failure || true
+        run: |
+          ctest --test-dir build-sanitizers -VV -R copyclickk_ui_tests --output-on-failure || true
+          if [ -f build-sanitizers/Testing/Temporary/LastTest.log ]; then
+            echo "--- build-sanitizers/Testing/Temporary/LastTest.log ---"
+            cat build-sanitizers/Testing/Temporary/LastTest.log
+          fi
+          if [ -x build-sanitizers/tests/copyclickk_ui_tests ]; then
+            echo "--- direct run: build-sanitizers/tests/copyclickk_ui_tests ---"
+            build-sanitizers/tests/copyclickk_ui_tests || true
+          fi
 
       - name: Upload sanitizer CTest logs on failure
         if: failure()
