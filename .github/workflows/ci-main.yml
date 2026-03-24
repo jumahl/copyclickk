@@ -16,6 +16,9 @@ jobs:
   build-test-package:
     name: Build, Test & Package
     runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      CTEST_OUTPUT_ON_FAILURE: 1
 
     steps:
       - name: Checkout
@@ -56,7 +59,8 @@ jobs:
 
       - name: Verbose test diagnostics on failure
         if: failure()
-        run: ctest --test-dir build -VV --output-on-failure
+        continue-on-error: true
+        run: ctest --test-dir build -VV -R copyclickk_ui_tests --output-on-failure || true
 
       - name: Upload CTest logs on failure
         if: failure()
