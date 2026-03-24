@@ -1,9 +1,11 @@
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <system_error>
+#include <thread>
 
 #include "../src/ipc/ClipboardService.h"
 #include "../src/storage/InMemoryHistoryRepository.h"
@@ -47,6 +49,13 @@ std::string permissionsToOctal(std::filesystem::perms perms) {
                      bit(std::filesystem::perms::others_exec);
 
   return std::to_string(owner) + std::to_string(group) + std::to_string(others);
+}
+
+std::filesystem::path buildUniqueSettingsTestPath() {
+  const auto nonce = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+  const auto threadIdHash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+  return std::filesystem::temp_directory_path() /
+         ("copyclickk-settings-test-" + std::to_string(nonce) + "-" + std::to_string(threadIdHash) + ".ini");
 }
 
 bool testDefaultEnglishLabels() {
@@ -152,7 +161,7 @@ bool testSettingsAdjustHistoryLimit() {
 }
 
 bool testSettingsPersistenceRoundTrip() {
-  const std::filesystem::path path = std::filesystem::temp_directory_path() / "copyclickk-settings-test.ini";
+  const std::filesystem::path path = buildUniqueSettingsTestPath();
   std::filesystem::remove(path);
 
   SettingsModel settings;
